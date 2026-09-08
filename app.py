@@ -12,6 +12,7 @@ Features:
 - Comprehensive Batched Training / Fine-Tuning GUI with ALL model & training hyperparameters,
   dynamic model-adaptive presets, live console streaming, and stop controls.
 - System diagnostics & model status inspector
+- Full display height (100vh) single-screen dashboard layout without unnecessary window scrolling.
 """
 
 import json
@@ -148,7 +149,6 @@ def load_cached_model(model_name="large-v3-turbo"):
 # Subtitle & File Export Helpers
 # ==============================================================================
 def format_timestamp_srt(seconds: float) -> str:
-    """Format seconds into SRT timestamp (HH:MM:SS,mmm)."""
     hours = int(seconds // 3600)
     minutes = int((seconds % 3600) // 60)
     secs = int(seconds % 60)
@@ -156,7 +156,6 @@ def format_timestamp_srt(seconds: float) -> str:
     return f"{hours:02d}:{minutes:02d}:{secs:02d},{millis:03d}"
 
 def format_timestamp_vtt(seconds: float) -> str:
-    """Format seconds into WebVTT timestamp (HH:MM:SS.mmm)."""
     hours = int(seconds // 3600)
     minutes = int((seconds % 3600) // 60)
     secs = int(seconds % 60)
@@ -164,7 +163,6 @@ def format_timestamp_vtt(seconds: float) -> str:
     return f"{hours:02d}:{minutes:02d}:{secs:02d}.{millis:03d}"
 
 def generate_srt(segments: list) -> str:
-    """Converts Whisper segment objects into standard SRT subtitle format."""
     lines = []
     for i, seg in enumerate(segments, 1):
         start = format_timestamp_srt(seg.get("start", 0.0))
@@ -174,7 +172,6 @@ def generate_srt(segments: list) -> str:
     return "\n".join(lines)
 
 def generate_vtt(segments: list) -> str:
-    """Converts Whisper segment objects into WebVTT format."""
     lines = ["WEBVTT\n"]
     for seg in segments:
         start = format_timestamp_vtt(seg.get("start", 0.0))
@@ -184,7 +181,6 @@ def generate_vtt(segments: list) -> str:
     return "\n".join(lines)
 
 def create_temp_export(content: str, suffix: str) -> str:
-    """Writes text content to a temporary file and returns path for download."""
     t = tempfile.NamedTemporaryFile(suffix=suffix, delete=False, mode="w", encoding="utf-8")
     t.write(content)
     t.close()
@@ -197,7 +193,7 @@ def transcribe_audio_streaming(audio_path, model_name, language_choice, beam_siz
     if not audio_path:
         yield (
             "Please record speech using your microphone or upload an audio file (.wav, .mp3, .flac).",
-            "<div style='color: #64748b; font-size: 0.9rem;'>Waiting for audio input...</div>",
+            "<div style='color: #64748b; font-size: 0.82rem;'>Waiting for audio input...</div>",
             None,
             None,
             gr.update(visible=False),
@@ -215,7 +211,7 @@ def transcribe_audio_streaming(audio_path, model_name, language_choice, beam_siz
 
     yield (
         "",
-        "<div style='background: #eff6ff; color: #1d4ed8; padding: 10px 14px; border-radius: 8px; border: 1px solid #bfdbfe; font-weight: 600;'>⏳ Loading Whisper model & initializing audio stream...</div>",
+        "<div style='background: #eff6ff; color: #1d4ed8; padding: 6px 10px; border-radius: 6px; border: 1px solid #bfdbfe; font-size: 0.85rem; font-weight: 600;'>⏳ Loading Whisper model & initializing audio stream...</div>",
         None,
         None,
         gr.update(visible=False),
@@ -292,16 +288,16 @@ def transcribe_audio_streaming(audio_path, model_name, language_choice, beam_siz
             elapsed = time.time() - start_time
 
             streaming_status = f"""
-            <div style="background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 8px; padding: 10px 14px; margin-bottom: 8px;">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-                    <span style="font-weight: 700; color: #0284c7; display: flex; align-items: center; gap: 6px;">
+            <div style="background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 6px; padding: 6px 10px; margin-bottom: 4px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                    <span style="font-weight: 700; color: #0284c7; font-size: 0.85rem; display: flex; align-items: center; gap: 6px;">
                         <span class="pulsing-dot"></span> ⏳ Transcribing live ({seg.end:.1f}s / {total_duration:.1f}s)...
                     </span>
-                    <span style="font-size: 0.85rem; color: #64748b; font-weight: 600;">
+                    <span style="font-size: 0.80rem; color: #64748b; font-weight: 600;">
                         {flag} {detected_lang} ({lang_prob:.1%})
                     </span>
                 </div>
-                <div style="background: #e2e8f0; border-radius: 4px; height: 6px; overflow: hidden;">
+                <div style="background: #e2e8f0; border-radius: 3px; height: 5px; overflow: hidden;">
                     <div style="background: #0284c7; width: {min(100, int((seg.end / max(1.0, total_duration)) * 100))}%; height: 100%; transition: width 0.2s ease;"></div>
                 </div>
             </div>
@@ -326,29 +322,29 @@ def transcribe_audio_streaming(audio_path, model_name, language_choice, beam_siz
         char_count = len(final_text)
 
         completion_html = f"""
-        <div style="display: flex; gap: 12px; flex-wrap: wrap; margin-top: 6px; margin-bottom: 8px;">
-            <div style="background: #f1f5f9; padding: 10px 14px; border-radius: 8px; border: 1px solid #cbd5e1; flex: 1; min-width: 140px;">
-                <span style="font-size: 0.75rem; text-transform: uppercase; color: #64748b; font-weight: 600;">Language Detected</span>
-                <div style="font-size: 1.05rem; font-weight: 700; color: #0f172a; margin-top: 2px;">
-                    {flag} {detected_lang} <span style="font-size: 0.85rem; font-weight: 400; color: #059669;">({lang_prob:.1%})</span>
+        <div style="display: flex; gap: 8px; flex-wrap: wrap; margin-top: 4px; margin-bottom: 4px;">
+            <div style="background: #f1f5f9; padding: 6px 10px; border-radius: 6px; border: 1px solid #cbd5e1; flex: 1; min-width: 110px;">
+                <span style="font-size: 0.70rem; text-transform: uppercase; color: #64748b; font-weight: 600;">Language</span>
+                <div style="font-size: 0.95rem; font-weight: 700; color: #0f172a; margin-top: 1px;">
+                    {flag} {detected_lang} <span style="font-size: 0.75rem; font-weight: 400; color: #059669;">({lang_prob:.1%})</span>
                 </div>
             </div>
-            <div style="background: #f1f5f9; padding: 10px 14px; border-radius: 8px; border: 1px solid #cbd5e1; flex: 1; min-width: 130px;">
-                <span style="font-size: 0.75rem; text-transform: uppercase; color: #64748b; font-weight: 600;">Audio Duration</span>
-                <div style="font-size: 1.05rem; font-weight: 700; color: #0f172a; margin-top: 2px;">
-                    ⏱️ {total_duration:.2f}s
+            <div style="background: #f1f5f9; padding: 6px 10px; border-radius: 6px; border: 1px solid #cbd5e1; flex: 1; min-width: 90px;">
+                <span style="font-size: 0.70rem; text-transform: uppercase; color: #64748b; font-weight: 600;">Duration</span>
+                <div style="font-size: 0.95rem; font-weight: 700; color: #0f172a; margin-top: 1px;">
+                    ⏱️ {total_duration:.1f}s
                 </div>
             </div>
-            <div style="background: #f1f5f9; padding: 10px 14px; border-radius: 8px; border: 1px solid #cbd5e1; flex: 1; min-width: 140px;">
-                <span style="font-size: 0.75rem; text-transform: uppercase; color: #64748b; font-weight: 600;">Processing Speed</span>
-                <div style="font-size: 1.05rem; font-weight: 700; color: #059669; margin-top: 2px;">
-                    🚀 {final_speed}x real-time <span style="font-size: 0.8rem; font-weight: 400; color: #64748b;">({elapsed_total:.2f}s)</span>
+            <div style="background: #f1f5f9; padding: 6px 10px; border-radius: 6px; border: 1px solid #cbd5e1; flex: 1; min-width: 110px;">
+                <span style="font-size: 0.70rem; text-transform: uppercase; color: #64748b; font-weight: 600;">Speed</span>
+                <div style="font-size: 0.95rem; font-weight: 700; color: #059669; margin-top: 1px;">
+                    🚀 {final_speed}x <span style="font-size: 0.75rem; font-weight: 400; color: #64748b;">({elapsed_total:.1f}s)</span>
                 </div>
             </div>
-            <div style="background: #f1f5f9; padding: 10px 14px; border-radius: 8px; border: 1px solid #cbd5e1; flex: 1; min-width: 120px;">
-                <span style="font-size: 0.75rem; text-transform: uppercase; color: #64748b; font-weight: 600;">Word Count</span>
-                <div style="font-size: 1.05rem; font-weight: 700; color: #0f172a; margin-top: 2px;">
-                    📊 {word_count} words <span style="font-size: 0.8rem; font-weight: 400; color: #64748b;">({char_count} chars)</span>
+            <div style="background: #f1f5f9; padding: 6px 10px; border-radius: 6px; border: 1px solid #cbd5e1; flex: 1; min-width: 90px;">
+                <span style="font-size: 0.70rem; text-transform: uppercase; color: #64748b; font-weight: 600;">Words</span>
+                <div style="font-size: 0.95rem; font-weight: 700; color: #0f172a; margin-top: 1px;">
+                    📊 {word_count} w <span style="font-size: 0.75rem; font-weight: 400; color: #64748b;">({char_count} c)</span>
                 </div>
             </div>
         </div>
@@ -386,7 +382,7 @@ def transcribe_audio_streaming(audio_path, model_name, language_choice, beam_siz
         error_msg = f"Error during transcription: {str(e)}"
         yield (
             error_msg,
-            f"<div style='color: #dc2626; font-weight: 600; padding: 8px 12px; background: #fee2e2; border-radius: 6px;'>❌ {error_msg}</div>",
+            f"<div style='color: #dc2626; font-weight: 600; padding: 6px 10px; background: #fee2e2; border-radius: 6px; font-size: 0.85rem;'>❌ {error_msg}</div>",
             None,
             None,
             gr.update(visible=False),
@@ -396,13 +392,13 @@ def transcribe_audio_streaming(audio_path, model_name, language_choice, beam_siz
         )
 
 def on_single_transcribe_stop():
-    return "<div style='color: #c2410c; font-weight: 600; padding: 10px 14px; background: #fff7ed; border-radius: 8px; border: 1px solid #fed7aa;'>🛑 Transcription stopped by user. You can modify audio, settings, or restart anytime.</div>"
+    return "<div style='color: #c2410c; font-weight: 600; padding: 6px 10px; background: #fff7ed; border-radius: 6px; border: 1px solid #fed7aa; font-size: 0.85rem;'>🛑 Transcription stopped by user. Ready for new audio.</div>"
 
 def on_single_clear():
     return (
         None,
         "",
-        "<div style='color: #64748b; font-size: 0.9rem;'>All inputs cleared. Ready for new audio.</div>",
+        "<div style='color: #64748b; font-size: 0.82rem;'>All inputs cleared. Ready for new audio.</div>",
         None,
         None,
         gr.update(visible=False),
@@ -444,7 +440,7 @@ def batch_transcribe_streaming(input_mode, uploaded_files, directory_path, model
     }.get(language_choice, "auto")
 
     yield (
-        f"<div style='background: #eff6ff; color: #1d4ed8; padding: 10px 14px; border-radius: 8px; border: 1px solid #bfdbfe; font-weight: 600;'>⏳ Initializing batch processing for {len(audio_paths)} files...</div>",
+        f"<div style='background: #eff6ff; color: #1d4ed8; padding: 6px 10px; border-radius: 6px; border: 1px solid #bfdbfe; font-size: 0.85rem; font-weight: 600;'>⏳ Initializing batch processing for {len(audio_paths)} files...</div>",
         None,
         gr.update(visible=False),
         gr.update(visible=False)
@@ -485,22 +481,22 @@ def batch_transcribe_streaming(input_mode, uploaded_files, directory_path, model
         out_json = create_temp_export(json.dumps(results, ensure_ascii=False, indent=2), ".json")
 
         running_html = f"""
-        <div style="display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 12px;">
-            <div style="background: #ecfdf5; border: 1px solid #6ee7b7; padding: 12px 16px; border-radius: 8px; flex: 1;">
-                <span style="color: #065f46; font-size: 0.8rem; font-weight: 600; text-transform: uppercase;">Progress</span>
-                <div style="font-size: 1.25rem; font-weight: 700; color: #064e3b; margin-top: 2px;">
+        <div style="display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 6px;">
+            <div style="background: #ecfdf5; border: 1px solid #6ee7b7; padding: 6px 12px; border-radius: 6px; flex: 1;">
+                <span style="color: #065f46; font-size: 0.72rem; font-weight: 600; text-transform: uppercase;">Progress</span>
+                <div style="font-size: 1.05rem; font-weight: 700; color: #064e3b; margin-top: 1px;">
                     ✅ {idx + 1} / {len(audio_paths)} Files
                 </div>
             </div>
-            <div style="background: #eff6ff; border: 1px solid #93c5fd; padding: 12px 16px; border-radius: 8px; flex: 1;">
-                <span style="color: #1e40af; font-size: 0.8rem; font-weight: 600; text-transform: uppercase;">Total Audio Time</span>
-                <div style="font-size: 1.25rem; font-weight: 700; color: #1e3a8a; margin-top: 2px;">
-                    ⏱️ {total_duration:.1f}s ({total_duration/60:.1f} min)
+            <div style="background: #eff6ff; border: 1px solid #93c5fd; padding: 6px 12px; border-radius: 6px; flex: 1;">
+                <span style="color: #1e40af; font-size: 0.72rem; font-weight: 600; text-transform: uppercase;">Audio Time</span>
+                <div style="font-size: 1.05rem; font-weight: 700; color: #1e3a8a; margin-top: 1px;">
+                    ⏱️ {total_duration:.1f}s ({total_duration/60:.1f}m)
                 </div>
             </div>
-            <div style="background: #f0fdf4; border: 1px solid #86efac; padding: 12px 16px; border-radius: 8px; flex: 1;">
-                <span style="color: #166534; font-size: 0.8rem; font-weight: 600; text-transform: uppercase;">Average Speed</span>
-                <div style="font-size: 1.25rem; font-weight: 700; color: #14532d; margin-top: 2px;">
+            <div style="background: #f0fdf4; border: 1px solid #86efac; padding: 6px 12px; border-radius: 6px; flex: 1;">
+                <span style="color: #166534; font-size: 0.72rem; font-weight: 600; text-transform: uppercase;">Avg Speed</span>
+                <div style="font-size: 1.05rem; font-weight: 700; color: #14532d; margin-top: 1px;">
                     🚀 {avg_speed}x real-time
                 </div>
             </div>
@@ -515,7 +511,7 @@ def batch_transcribe_streaming(input_mode, uploaded_files, directory_path, model
         )
 
 def on_batch_stop():
-    return "<div style='color: #c2410c; font-weight: 600; padding: 10px 14px; background: #fff7ed; border-radius: 8px; border: 1px solid #fed7aa;'>🛑 Batch processing stopped by user. Files completed so far are displayed below and ready to download.</div>"
+    return "<div style='color: #c2410c; font-weight: 600; padding: 6px 10px; background: #fff7ed; border-radius: 6px; border: 1px solid #fed7aa; font-size: 0.85rem;'>🛑 Batch processing stopped by user. Files completed so far are displayed below.</div>"
 
 # ==============================================================================
 # Tab 3: Streaming Dataset Benchmark (WER / CER) with Stop Support
@@ -552,7 +548,7 @@ def evaluate_dataset_streaming(csv_file_upload, metadata_csv_path, audio_dir, mo
 
     yield (
         "Starting benchmark evaluation...",
-        f"<div style='background: #eff6ff; color: #1d4ed8; padding: 10px 14px; border-radius: 8px; border: 1px solid #bfdbfe; font-weight: 600;'>⏳ Initializing model and preparing {len(df)} dataset rows...</div>",
+        f"<div style='background: #eff6ff; color: #1d4ed8; padding: 6px 10px; border-radius: 6px; border: 1px solid #bfdbfe; font-size: 0.85rem; font-weight: 600;'>⏳ Initializing model and preparing {len(df)} dataset rows...</div>",
         None,
         gr.update(visible=False)
     )
@@ -604,22 +600,22 @@ def evaluate_dataset_streaming(csv_file_upload, metadata_csv_path, audio_dir, mo
         cer_color = "#16a34a" if running_cer < 0.10 else ("#ca8a04" if running_cer < 0.25 else "#dc2626")
 
         summary_cards = f"""
-        <div style="display: flex; gap: 14px; flex-wrap: wrap; margin-bottom: 12px;">
-            <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 14px 18px; flex: 1;">
-                <span style="font-size: 0.8rem; font-weight: 600; color: #64748b; text-transform: uppercase;">Evaluated Samples</span>
-                <div style="font-size: 1.5rem; font-weight: 700; color: #0f172a; margin-top: 4px;">
+        <div style="display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 6px;">
+            <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 6px 12px; flex: 1;">
+                <span style="font-size: 0.70rem; font-weight: 600; color: #64748b; text-transform: uppercase;">Evaluated Samples</span>
+                <div style="font-size: 1.15rem; font-weight: 700; color: #0f172a; margin-top: 1px;">
                     📈 {len(results_df)} / {len(df)}
                 </div>
             </div>
-            <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 14px 18px; flex: 1;">
-                <span style="font-size: 0.8rem; font-weight: 600; color: #64748b; text-transform: uppercase;">Running WER</span>
-                <div style="font-size: 1.5rem; font-weight: 700; color: {wer_color}; margin-top: 4px;">
+            <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 6px 12px; flex: 1;">
+                <span style="font-size: 0.70rem; font-weight: 600; color: #64748b; text-transform: uppercase;">Running WER</span>
+                <div style="font-size: 1.15rem; font-weight: 700; color: {wer_color}; margin-top: 1px;">
                     🎯 {running_wer:.2%}
                 </div>
             </div>
-            <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 14px 18px; flex: 1;">
-                <span style="font-size: 0.8rem; font-weight: 600; color: #64748b; text-transform: uppercase;">Running CER</span>
-                <div style="font-size: 1.5rem; font-weight: 700; color: {cer_color}; margin-top: 4px;">
+            <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 6px 12px; flex: 1;">
+                <span style="font-size: 0.70rem; font-weight: 600; color: #64748b; text-transform: uppercase;">Running CER</span>
+                <div style="font-size: 1.15rem; font-weight: 700; color: {cer_color}; margin-top: 1px;">
                     🔤 {running_cer:.2%}
                 </div>
             </div>
@@ -635,7 +631,7 @@ def evaluate_dataset_streaming(csv_file_upload, metadata_csv_path, audio_dir, mo
         )
 
 def on_eval_stop():
-    return "<div style='color: #c2410c; font-weight: 600; padding: 10px 14px; background: #fff7ed; border-radius: 8px; border: 1px solid #fed7aa;'>🛑 Benchmark stopped by user. Partial evaluation results and metrics are preserved below.</div>"
+    return "<div style='color: #c2410c; font-weight: 600; padding: 6px 10px; background: #fff7ed; border-radius: 6px; border: 1px solid #fed7aa; font-size: 0.85rem;'>🛑 Benchmark stopped by user. Results preserved below.</div>"
 
 # ==============================================================================
 # Tab 4: Batched Audio Training / Fine-Tuning Manager
@@ -647,9 +643,9 @@ def check_training_environment():
         if torch.cuda.is_available():
             dev = torch.cuda.get_device_name(0)
             mem = torch.cuda.get_device_properties(0).total_memory / (1024**3)
-            checks.append(f"🟢 **Compute Hardware**: NVIDIA CUDA GPU `{dev}` ({mem:.1f} GB VRAM) is ready.")
+            checks.append(f"🟢 **Compute Hardware**: NVIDIA CUDA GPU `{dev}` ({mem:.1f} GB VRAM) ready.")
         else:
-            checks.append("🟡 **Compute Hardware**: No CUDA GPU found (running in CPU mode). CPU can be used to test small mini-batches, but fine-tuning `large-v3-turbo` on full datasets requires a GPU (≥16GB VRAM recommended).")
+            checks.append("🟡 **Compute Hardware**: No CUDA GPU found (running in CPU mode). CPU can test small mini-batches, but fine-tuning `large-v3-turbo` requires a GPU (≥16GB VRAM recommended).")
     except Exception as e:
         checks.append(f"🔴 **Compute Hardware**: {e}")
 
@@ -661,9 +657,9 @@ def check_training_environment():
             missing.append(pkg)
 
     if missing:
-        checks.append(f"⚠️ **Missing Training Packages**: `{', '.join(missing)}`\n> **To install**: Run `pip install -r requirements_gpu.txt` in your terminal.")
+        checks.append(f"⚠️ **Missing Packages**: `{', '.join(missing)}` (Run `pip install -r requirements_gpu.txt`)")
     else:
-        checks.append("🟢 **All Training Packages Installed**: `transformers`, `datasets`, `peft`, `accelerate`, and `evaluate` are installed.")
+        checks.append("🟢 **All Training Packages Installed**: `transformers`, `datasets`, `peft`, `accelerate`, `evaluate`.")
 
     return "\n\n".join(checks)
 
@@ -699,7 +695,6 @@ def validate_training_dataset_gui(train_csv, train_audio, val_csv, val_audio):
     return "\n\n".join(report)
 
 def apply_model_preset(model_name):
-    """Adapts all training hyperparameters to optimal defaults when base model changes."""
     preset = MODEL_PRESETS.get(model_name, {
         "batch_size": 8,
         "eval_batch_size": 8,
@@ -812,7 +807,7 @@ def start_training_gui(
 
     missing = [pkg for pkg in ["transformers", "datasets", "peft", "accelerate"] if not _is_pkg_installed(pkg)]
     if missing:
-        error_txt = f"❌ Missing required packages for training: {', '.join(missing)}\nPlease install training requirements:\n  pip install -r requirements_gpu.txt\n"
+        error_txt = f"❌ Missing required packages for training: {', '.join(missing)}\nPlease run: pip install -r requirements_gpu.txt\n"
         yield error_txt, f"<div style='color: #dc2626; font-weight: 600;'>{error_txt}</div>"
         return
 
@@ -888,7 +883,7 @@ def start_training_gui(
         "Launching training process...\n"
     ]
 
-    status_html = f"<div style='background: #eff6ff; color: #1e40af; padding: 10px 14px; border-radius: 8px; border: 1px solid #93c5fd; font-weight: 600;'>⏳ Training running (Effective Batch Size: {effective_batch})...</div>"
+    status_html = f"<div style='background: #eff6ff; color: #1e40af; padding: 6px 10px; border-radius: 6px; border: 1px solid #93c5fd; font-size: 0.85rem; font-weight: 600;'>⏳ Training running (Effective Batch Size: {effective_batch})...</div>"
     yield "\n".join(log_lines), status_html
 
     try:
@@ -907,8 +902,8 @@ def start_training_gui(
 
         for line in iter(ACTIVE_TRAIN_PROC.stdout.readline, ""):
             log_lines.append(line.rstrip())
-            if len(log_lines) > 400:
-                log_lines = log_lines[-400:]
+            if len(log_lines) > 300:
+                log_lines = log_lines[-300:]
             yield "\n".join(log_lines), status_html
 
         ACTIVE_TRAIN_PROC.stdout.close()
@@ -917,10 +912,10 @@ def start_training_gui(
 
         if code == 0:
             log_lines.append(f"\n🎉 TRAINING FINISHED SUCCESSFULLY! Checkpoints stored in: {output_dir}")
-            final_status = "<div style='background: #ecfdf5; color: #065f46; padding: 10px 14px; border-radius: 8px; border: 1px solid #6ee7b7; font-weight: 600;'>✅ Training completed successfully!</div>"
+            final_status = "<div style='background: #ecfdf5; color: #065f46; padding: 6px 10px; border-radius: 6px; border: 1px solid #6ee7b7; font-size: 0.85rem; font-weight: 600;'>✅ Training completed successfully!</div>"
         else:
             log_lines.append(f"\n⚠️ Process exited with return code: {code}")
-            final_status = f"<div style='background: #fff1f2; color: #9f1239; padding: 10px 14px; border-radius: 8px; border: 1px solid #fecdd3; font-weight: 600;'>⚠️ Training stopped or failed (exit code {code}).</div>"
+            final_status = f"<div style='background: #fff1f2; color: #9f1239; padding: 6px 10px; border-radius: 6px; border: 1px solid #fecdd3; font-size: 0.85rem; font-weight: 600;'>⚠️ Training stopped or failed (exit code {code}).</div>"
 
         yield "\n".join(log_lines), final_status
 
@@ -939,10 +934,10 @@ def stop_training_gui():
             if ACTIVE_TRAIN_PROC.poll() is None:
                 ACTIVE_TRAIN_PROC.kill()
             ACTIVE_TRAIN_PROC = None
-            return "🛑 Training aborted by user.", "<div style='background: #fff7ed; color: #c2410c; padding: 10px 14px; border-radius: 8px; border: 1px solid #fed7aa; font-weight: 600;'>🛑 Training process terminated by user.</div>"
+            return "🛑 Training aborted by user.", "<div style='background: #fff7ed; color: #c2410c; padding: 6px 10px; border-radius: 6px; border: 1px solid #fed7aa; font-size: 0.85rem; font-weight: 600;'>🛑 Training process terminated by user.</div>"
         except Exception as err:
             return f"Error stopping training: {err}", f"<div style='color: #dc2626;'>{err}</div>"
-    return "No active training process found.", "<div style='color: #64748b;'>Idle - No training process active.</div>"
+    return "No active training process found.", "<div style='color: #64748b; font-size: 0.85rem;'>Idle - No training process active.</div>"
 
 def _is_pkg_installed(pkg_name):
     try:
@@ -988,27 +983,125 @@ def get_diagnostics():
 """
 
 # ==============================================================================
-# Gradio UI Construction & Styling
+# Gradio UI Construction & Compact Layout
 # ==============================================================================
 custom_css = """
+/* Full display height layout - zero outer scrolling */
+html, body {
+    margin: 0 !important;
+    padding: 0 !important;
+    height: 100vh !important;
+    max-height: 100vh !important;
+    overflow: hidden !important;
+}
+
+.gradio-container {
+    max-width: 100% !important;
+    width: 100% !important;
+    height: 100vh !important;
+    max-height: 100vh !important;
+    padding: 4px 12px !important;
+    box-sizing: border-box !important;
+    display: flex !important;
+    flex-direction: column !important;
+    overflow-y: auto !important;
+}
+
+/* Modern sleek slim scrollbars */
+::-webkit-scrollbar {
+    width: 5px;
+    height: 5px;
+}
+::-webkit-scrollbar-track {
+    background: transparent;
+}
+::-webkit-scrollbar-thumb {
+    background: #cbd5e1;
+    border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+    background: #94a3b8;
+}
+* {
+    scrollbar-width: thin;
+    scrollbar-color: #cbd5e1 transparent;
+}
+
+/* Compact header banner */
+.header-banner {
+    padding: 6px 14px !important;
+    border-radius: 8px !important;
+    margin-bottom: 4px !important;
+    flex-shrink: 0 !important;
+}
+
+/* Compact tabs bar */
+.tabs {
+    flex: 1 !important;
+    display: flex !important;
+    flex-direction: column !important;
+    min-height: 0 !important;
+}
+.tabs > .tab-nav {
+    margin-bottom: 4px !important;
+    flex-shrink: 0 !important;
+}
+.tabs > .tab-nav > button {
+    padding: 4px 12px !important;
+    font-size: 0.84rem !important;
+}
+.tabitem {
+    flex: 1 !important;
+    min-height: 0 !important;
+    overflow-y: auto !important;
+}
+
+/* Scrollable column container for rich forms without full-page scrolling */
+.col-scroll {
+    max-height: calc(100vh - 120px) !important;
+    overflow-y: auto !important;
+    padding-right: 4px !important;
+}
+
+/* Compact Form Components */
+.gr-button {
+    min-height: 32px !important;
+    padding: 4px 10px !important;
+    font-size: 0.84rem !important;
+}
+.gr-input, .gr-select {
+    padding: 2px 6px !important;
+    font-size: 0.85rem !important;
+}
+.gr-form {
+    gap: 4px !important;
+}
+.accordion {
+    margin-bottom: 3px !important;
+}
+.accordion > .label-wrap {
+    padding: 3px 8px !important;
+    font-size: 0.84rem !important;
+}
+
 /* Responsive Bengali & English Typography */
 .bangla-output textarea {
-    font-size: 1.25rem !important;
-    line-height: 1.85 !important;
+    font-size: 1.15rem !important;
+    line-height: 1.6 !important;
     font-family: 'SolaimanLipi', 'Noto Sans Bengali', 'Hind Siliguri', 'Segoe UI', system-ui, sans-serif !important;
     color: #0f172a !important;
     background-color: #f8fafc !important;
-    border-radius: 8px !important;
+    border-radius: 6px !important;
 }
 
 /* Console log styling */
 .console-log textarea {
     font-family: 'JetBrains Mono', 'Fira Code', 'Courier New', monospace !important;
-    font-size: 0.88rem !important;
-    line-height: 1.5 !important;
+    font-size: 0.78rem !important;
+    line-height: 1.35 !important;
     background-color: #0f172a !important;
     color: #38bdf8 !important;
-    border-radius: 8px !important;
+    border-radius: 6px !important;
 }
 
 /* Pulsing live streaming indicator */
@@ -1019,8 +1112,8 @@ custom_css = """
 }
 .pulsing-dot {
     display: inline-block;
-    width: 8px;
-    height: 8px;
+    width: 7px;
+    height: 7px;
     background-color: #0284c7;
     border-radius: 50%;
     animation: pulse 1.5s infinite ease-in-out;
@@ -1034,52 +1127,50 @@ theme = gr.themes.Soft(
 )
 
 with gr.Blocks(title="Bangla & English ASR - Whisper") as demo:
-    # Header Banner
+    # Header Banner (Compact)
     gr.HTML("""
-    <div style="background: linear-gradient(135deg, #064e3b 0%, #065f46 50%, #047857 100%); padding: 22px 28px; border-radius: 12px; color: white; margin-bottom: 16px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);">
-        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
-            <div>
-                <h1 style="font-size: 1.75rem; font-weight: 800; margin: 0; display: flex; align-items: center; gap: 10px;">
-                    🎙️ Bangla & English Speech Recognition (ASR)
-                </h1>
-                <p style="font-size: 0.95rem; margin: 6px 0 0 0; opacity: 0.9;">
-                    High-accuracy speech-to-text with live streaming chunks, batched audio training from GUI, and smart bilingual language routing.
-                </p>
-            </div>
-            <div style="display: flex; gap: 8px; flex-wrap: wrap;">
-                <span style="background: rgba(255,255,255,0.18); padding: 5px 12px; border-radius: 20px; font-size: 0.8rem; font-weight: 600; backdrop-filter: blur(4px);">
-                    🇧🇩 বাংলা & 🇬🇧 English
-                </span>
-                <span style="background: rgba(255,255,255,0.18); padding: 5px 12px; border-radius: 20px; font-size: 0.8rem; font-weight: 600; backdrop-filter: blur(4px);">
-                    ⚡ INT8 Inference & Full Parameter Training
-                </span>
-                <span style="background: rgba(255,255,255,0.18); padding: 5px 12px; border-radius: 20px; font-size: 0.8rem; font-weight: 600; backdrop-filter: blur(4px);">
-                    🚀 large-v3-turbo
-                </span>
-            </div>
+    <div class="header-banner" style="background: linear-gradient(135deg, #064e3b 0%, #065f46 50%, #047857 100%); color: white; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
+        <div style="display: flex; align-items: center; gap: 10px;">
+            <h1 style="font-size: 1.15rem; font-weight: 700; margin: 0;">
+                🎙️ Bangla & English ASR Studio
+            </h1>
+            <span style="font-size: 0.80rem; opacity: 0.9;">
+                Whisper large-v3-turbo with CTranslate2 INT8 & LoRA Fine-Tuning
+            </span>
+        </div>
+        <div style="display: flex; gap: 6px;">
+            <span style="background: rgba(255,255,255,0.18); padding: 3px 8px; border-radius: 12px; font-size: 0.72rem; font-weight: 600;">
+                🇧🇩 বাংলা & 🇬🇧 English
+            </span>
+            <span style="background: rgba(255,255,255,0.18); padding: 3px 8px; border-radius: 12px; font-size: 0.72rem; font-weight: 600;">
+                ⚡ INT8 Inference
+            </span>
+            <span style="background: rgba(255,255,255,0.18); padding: 3px 8px; border-radius: 12px; font-size: 0.72rem; font-weight: 600;">
+                🚀 large-v3-turbo
+            </span>
         </div>
     </div>
     """)
 
     with gr.Tabs():
         # ======================================================================
-        # TAB 1: Live Microphone & Single File
+        # TAB 1: Live Microphone & Single File (Compact Dashboard)
         # ======================================================================
-        with gr.TabItem("🎯 Live Mic & Audio File Transcription"):
+        with gr.TabItem("🎯 Live Mic & Audio"):
             with gr.Row():
                 with gr.Column(scale=1):
                     audio_input = gr.Audio(
                         sources=["microphone", "upload"],
                         type="filepath",
-                        label="Record Speech or Upload Audio File (.wav, .mp3, .flac, .ogg, .m4a)"
+                        label="Record Speech or Upload Audio File"
                     )
 
-                    with gr.Accordion("⚙️ Model, Decoding & Quality Settings", open=True):
+                    with gr.Accordion("⚙️ Model & Quality Tuning", open=False):
                         with gr.Row():
                             model_dropdown = gr.Dropdown(
                                 choices=["large-v3-turbo", "tiny"],
                                 value="large-v3-turbo",
-                                label="Whisper Checkpoint",
+                                label="Checkpoint",
                                 scale=1
                             )
                             lang_dropdown = gr.Dropdown(
@@ -1089,42 +1180,25 @@ with gr.Blocks(title="Bangla & English ASR - Whisper") as demo:
                                     "English (en)"
                                 ],
                                 value="Auto (Smart Bilingual: Bangla / English)",
-                                label="Language Routing",
+                                label="Language",
                                 scale=1
                             )
 
                         with gr.Row():
-                            beam_slider = gr.Slider(
-                                minimum=1,
-                                maximum=10,
-                                value=5,
-                                step=1,
-                                label="Beam Size (Accuracy vs Latency)"
-                            )
-                            temp_slider = gr.Slider(
-                                minimum=0.0,
-                                maximum=1.0,
-                                value=0.0,
-                                step=0.1,
-                                label="Temperature (0.0 = Deterministic)"
-                            )
+                            beam_slider = gr.Slider(minimum=1, maximum=10, value=5, step=1, label="Beam Size")
+                            temp_slider = gr.Slider(minimum=0.0, maximum=1.0, value=0.0, step=0.1, label="Temperature")
 
-                        with gr.Row():
-                            vad_checkbox = gr.Checkbox(
-                                value=True,
-                                label="Enable VAD (Voice Activity Detection filter)"
-                            )
-
+                        vad_checkbox = gr.Checkbox(value=True, label="Enable VAD (Silence Trimming)")
                         prompt_input = gr.Textbox(
-                            label="Context Hints / Initial Vocabulary (Optional)",
-                            placeholder="e.g. বাংলাদেশ, কৃত্রিম বুদ্ধিমত্তা, ঢাকা, Whisper ASR",
+                            label="Context Hints / Vocabulary",
+                            placeholder="e.g. বাংলাদেশ, কৃত্রিম বুদ্ধিমত্তা, ঢাকা",
                             lines=1
                         )
 
                     with gr.Row():
-                        transcribe_btn = gr.Button("🚀 Transcribe Speech", variant="primary", size="lg", scale=2)
-                        stop_btn = gr.Button("🛑 Stop / Cancel", variant="stop", size="lg", scale=1)
-                        clear_btn = gr.Button("🗑️ Clear", variant="secondary", size="lg", scale=1)
+                        transcribe_btn = gr.Button("🚀 Transcribe", variant="primary", size="sm", scale=2)
+                        stop_btn = gr.Button("🛑 Stop", variant="stop", size="sm", scale=1)
+                        clear_btn = gr.Button("🗑️ Clear", variant="secondary", size="sm", scale=1)
 
                     candidate_samples = [
                         "data/test/audio/test.mp3",
@@ -1161,31 +1235,31 @@ with gr.Blocks(title="Bangla & English ASR - Whisper") as demo:
 
                 with gr.Column(scale=1):
                     with gr.Row():
-                        gr.Markdown("#### 📝 Transcribed Output")
+                        gr.Markdown("##### 📝 Transcribed Output")
                         copy_btn = gr.Button("📋 Copy Text", size="sm", variant="secondary")
 
                     output_text = gr.Textbox(
                         label="",
                         show_label=False,
-                        lines=7,
-                        placeholder="Transcribed speech will appear here in real-time as it's being decoded...",
+                        lines=5,
+                        placeholder="Live streaming output will appear here as decoded...",
                         elem_classes=["bangla-output"]
                     )
 
                     metrics_output = gr.HTML()
 
-                    gr.Markdown("##### 💾 Download & Subtitle Exports")
                     with gr.Row():
-                        download_txt = gr.DownloadButton("📄 Text (.txt)", visible=False, size="sm")
+                        download_txt = gr.DownloadButton("📄 Text", visible=False, size="sm")
                         download_srt = gr.DownloadButton("🎬 Subtitles (.srt)", visible=False, size="sm")
                         download_vtt = gr.DownloadButton("🌐 WebVTT (.vtt)", visible=False, size="sm")
-                        download_json = gr.DownloadButton("📦 JSON (.json)", visible=False, size="sm")
+                        download_json = gr.DownloadButton("📦 JSON", visible=False, size="sm")
 
-                    with gr.Accordion("⏱️ Timestamped Segments Breakdown", open=False):
+                    with gr.Accordion("⏱️ Segments Breakdown", open=False):
                         segments_table = gr.DataFrame(
                             headers=["Start (s)", "End (s)", "Duration (s)", "Transcription"],
-                            label="Individual Speech Segments",
-                            wrap=True
+                            label="Speech Segments",
+                            wrap=True,
+                            max_height=200
                         )
 
                     with gr.Accordion("🔍 Full JSON Metadata", open=False):
@@ -1217,32 +1291,27 @@ with gr.Blocks(title="Bangla & English ASR - Whisper") as demo:
             )
 
         # ======================================================================
-        # TAB 2: Batch Audio Transcription with Stop Support
+        # TAB 2: Batch Audio Transcription (Compact)
         # ======================================================================
-        with gr.TabItem("📂 Batch Audio Transcription"):
-            gr.Markdown("""
-            ### Batch Transcribe Audio Files
-            Process multiple audio files. Drag and drop audio files directly in the browser, or specify a server directory.
-            You can stop batch processing at any point; completed files will be preserved.
-            """)
+        with gr.TabItem("📂 Batch Transcription"):
             with gr.Row():
                 with gr.Column(scale=1):
                     batch_mode = gr.Radio(
                         choices=["Upload Files directly in Browser", "Specify Server Directory Path"],
                         value="Upload Files directly in Browser",
-                        label="Batch Source Mode"
+                        label="Source Mode"
                     )
 
                     batch_files_upload = gr.File(
                         file_count="multiple",
                         file_types=["audio"],
-                        label="Drop Audio Files Here (.wav, .mp3, .flac, .ogg, .m4a)",
+                        label="Drop Audio Files Here",
                         visible=True
                     )
 
                     batch_dir_input = gr.Textbox(
                         value="data/test/audio",
-                        label="Directory Path on Server",
+                        label="Server Directory Path",
                         visible=False
                     )
 
@@ -1253,36 +1322,29 @@ with gr.Blocks(title="Bangla & English ASR - Whisper") as demo:
                     )
 
                     with gr.Row():
-                        batch_model = gr.Dropdown(
-                            choices=["large-v3-turbo", "tiny"],
-                            value="large-v3-turbo",
-                            label="Whisper Model"
-                        )
+                        batch_model = gr.Dropdown(choices=["large-v3-turbo", "tiny"], value="large-v3-turbo", label="Model")
                         batch_lang = gr.Dropdown(
-                            choices=[
-                                "Auto (Smart Bilingual: Bangla / English)",
-                                "Bangla (বাংলা)",
-                                "English (en)"
-                            ],
+                            choices=["Auto (Smart Bilingual: Bangla / English)", "Bangla (বাংলা)", "English (en)"],
                             value="Auto (Smart Bilingual: Bangla / English)",
-                            label="Language Mode"
+                            label="Language"
                         )
 
                     with gr.Row():
-                        batch_btn = gr.Button("⚡ Start Batch Transcription", variant="primary", size="lg", scale=2)
-                        batch_stop_btn = gr.Button("🛑 Stop Batch", variant="stop", size="lg", scale=1)
+                        batch_btn = gr.Button("⚡ Start Batch", variant="primary", size="sm", scale=2)
+                        batch_stop_btn = gr.Button("🛑 Stop Batch", variant="stop", size="sm", scale=1)
 
                 with gr.Column(scale=1):
                     batch_status_html = gr.HTML()
                     with gr.Row():
-                        batch_download_csv = gr.DownloadButton("📥 Download CSV Report", visible=False)
-                        batch_download_json = gr.DownloadButton("📥 Download JSON Results", visible=False)
+                        batch_download_csv = gr.DownloadButton("📥 Download CSV", visible=False, size="sm")
+                        batch_download_json = gr.DownloadButton("📥 Download JSON", visible=False, size="sm")
 
-            batch_table = gr.DataFrame(
-                headers=["File", "Language", "Confidence", "Duration (s)", "Speed", "Transcription"],
-                label="Batch Results (updates live)",
-                wrap=True
-            )
+                    batch_table = gr.DataFrame(
+                        headers=["File", "Language", "Confidence", "Duration (s)", "Speed", "Transcription"],
+                        label="Batch Results (updates live)",
+                        wrap=True,
+                        max_height=320
+                    )
 
             batch_event = batch_btn.click(
                 fn=batch_transcribe_streaming,
@@ -1297,58 +1359,38 @@ with gr.Blocks(title="Bangla & English ASR - Whisper") as demo:
             )
 
         # ======================================================================
-        # TAB 3: Dataset Benchmark (WER & CER) with Stop Support
+        # TAB 3: Dataset Benchmark (WER & CER) (Compact)
         # ======================================================================
-        with gr.TabItem("📊 Benchmark & Evaluate (WER / CER)"):
-            gr.Markdown("""
-            ### Accuracy Benchmark Tool
-            Evaluate speech recognition accuracy using **Word Error Rate (WER)** and **Character Error Rate (CER)** against a test dataset with ground truth references.
-            You can stop benchmarking at any time without losing evaluated sample metrics.
-            """)
+        with gr.TabItem("📊 Benchmark (WER / CER)"):
             with gr.Row():
                 with gr.Column(scale=1):
-                    eval_csv_upload = gr.File(
-                        label="Upload Metadata CSV (Optional: overrides path below)",
-                        file_types=[".csv"]
-                    )
-                    eval_csv_input = gr.Textbox(
-                        value="data/test/metadata.csv",
-                        label="Metadata CSV File Path on Server"
-                    )
-                    eval_audio_dir = gr.Textbox(
-                        value="data/test/audio",
-                        label="Audio Directory Path"
-                    )
+                    eval_csv_upload = gr.File(label="Upload CSV (Optional)", file_types=[".csv"])
                     with gr.Row():
-                        eval_model = gr.Dropdown(
-                            choices=["large-v3-turbo", "tiny"],
-                            value="large-v3-turbo",
-                            label="Whisper Model"
-                        )
+                        eval_csv_input = gr.Textbox(value="data/test/metadata.csv", label="Metadata CSV Path")
+                        eval_audio_dir = gr.Textbox(value="data/test/audio", label="Audio Directory")
+                    with gr.Row():
+                        eval_model = gr.Dropdown(choices=["large-v3-turbo", "tiny"], value="large-v3-turbo", label="Model")
                         eval_lang = gr.Dropdown(
-                            choices=[
-                                "Auto (Smart Bilingual: Bangla / English)",
-                                "Bangla (বাংলা)",
-                                "English (en)"
-                            ],
+                            choices=["Auto (Smart Bilingual: Bangla / English)", "Bangla (বাংলা)", "English (en)"],
                             value="Auto (Smart Bilingual: Bangla / English)",
-                            label="Language Mode"
+                            label="Language"
                         )
 
                     with gr.Row():
-                        eval_btn = gr.Button("📈 Run Benchmark", variant="primary", size="lg", scale=2)
-                        eval_stop_btn = gr.Button("🛑 Stop Evaluation", variant="stop", size="lg", scale=1)
+                        eval_btn = gr.Button("📈 Run Benchmark", variant="primary", size="sm", scale=2)
+                        eval_stop_btn = gr.Button("🛑 Stop", variant="stop", size="sm", scale=1)
 
                 with gr.Column(scale=1):
                     eval_status = gr.Markdown()
                     eval_metrics_html = gr.HTML()
-                    eval_download_csv = gr.DownloadButton("📥 Download Error Report (CSV)", visible=False)
+                    eval_download_csv = gr.DownloadButton("📥 Download Error CSV", visible=False, size="sm")
 
-            eval_results_table = gr.DataFrame(
-                headers=["File", "Ground Truth", "Prediction", "WER", "CER"],
-                label="Sample Predictions vs Ground Truth (updates live)",
-                wrap=True
-            )
+                    eval_results_table = gr.DataFrame(
+                        headers=["File", "Ground Truth", "Prediction", "WER", "CER"],
+                        label="Predictions vs Ground Truth",
+                        wrap=True,
+                        max_height=320
+                    )
 
             eval_event = eval_btn.click(
                 fn=evaluate_dataset_streaming,
@@ -1363,25 +1405,19 @@ with gr.Blocks(title="Bangla & English ASR - Whisper") as demo:
             )
 
         # ======================================================================
-        # TAB 4: Batched Audio Training / Fine-Tuning Manager (Full Params)
+        # TAB 4: Batched Training Studio (All 36 Parameters + Adaptive Layout)
         # ======================================================================
-        with gr.TabItem("🏋️ Train / Fine-Tune (Batched)"):
-            gr.Markdown("""
-            ### 🏋️ Whisper Batched Audio Training & Fine-Tuning Studio
-            Fine-tune Whisper models on customized Bengali and English speech datasets with **complete parameter control**.
-            Changing the base model automatically adapts optimal batching, learning rate, and architecture presets.
-            """)
-
-            with gr.Accordion("🔍 Hardware Readiness & Dependencies Check", open=False):
-                train_env_markdown = gr.Markdown(value=check_training_environment())
-                check_env_btn = gr.Button("🔄 Re-Check GPU & Packages", size="sm", variant="secondary")
-                check_env_btn.click(fn=check_training_environment, outputs=[train_env_markdown])
-
+        with gr.TabItem("🏋️ Batched Training"):
             with gr.Row():
-                # Left Column: Complete Parameter Controls
-                with gr.Column(scale=1):
-                    # Section 1: Model & Architecture Selection
-                    with gr.Accordion("🤖 1. Base Model & Architecture (Auto-Adaptive)", open=True):
+                # Left Column: All Hyperparameters organized compactly
+                with gr.Column(scale=1, elem_classes=["col-scroll"]):
+                    with gr.Accordion("🔍 Hardware & Dependencies Check", open=False):
+                        train_env_markdown = gr.Markdown(value=check_training_environment())
+                        check_env_btn = gr.Button("🔄 Re-Check GPU", size="sm", variant="secondary")
+                        check_env_btn.click(fn=check_training_environment, outputs=[train_env_markdown])
+
+                    # 1. Base Model & Architecture
+                    with gr.Accordion("🤖 1. Base Model Checkpoint (Auto-Adaptive)", open=True):
                         base_model_dropdown = gr.Dropdown(
                             choices=[
                                 "openai/whisper-large-v3-turbo",
@@ -1392,36 +1428,28 @@ with gr.Blocks(title="Bangla & English ASR - Whisper") as demo:
                                 "openai/whisper-tiny"
                             ],
                             value="openai/whisper-large-v3-turbo",
-                            label="Whisper Base Checkpoint (select to auto-adapt parameters)"
+                            label="Base Model (select to auto-adapt parameters)"
                         )
                         model_desc_markdown = gr.Markdown(value=MODEL_PRESETS["openai/whisper-large-v3-turbo"]["description"])
 
                         with gr.Row():
-                            target_lang_dropdown = gr.Dropdown(
-                                choices=["bengali", "english"],
-                                value="bengali",
-                                label="Target Language"
-                            )
-                            task_dropdown = gr.Dropdown(
-                                choices=["transcribe", "translate"],
-                                value="transcribe",
-                                label="Task"
-                            )
+                            target_lang_dropdown = gr.Dropdown(choices=["bengali", "english"], value="bengali", label="Target Language")
+                            task_dropdown = gr.Dropdown(choices=["transcribe", "translate"], value="transcribe", label="Task")
 
-                    # Section 2: Datasets & Preprocessing
+                    # 2. Datasets & Preprocessing
                     with gr.Accordion("📁 2. Dataset Paths & Audio Filtering", open=True):
                         with gr.Row():
-                            train_csv_box = gr.Textbox(value="data/train/metadata.csv", label="Train Metadata CSV Path")
-                            train_audio_box = gr.Textbox(value="data/train/audio", label="Train Audio Directory")
+                            train_csv_box = gr.Textbox(value="data/train/metadata.csv", label="Train CSV")
+                            train_audio_box = gr.Textbox(value="data/train/audio", label="Train Audio Folder")
                         with gr.Row():
-                            val_csv_box = gr.Textbox(value="data/val/metadata.csv", label="Validation Metadata CSV Path")
-                            val_audio_box = gr.Textbox(value="data/val/audio", label="Validation Audio Directory")
+                            val_csv_box = gr.Textbox(value="data/val/metadata.csv", label="Val CSV")
+                            val_audio_box = gr.Textbox(value="data/val/audio", label="Val Audio Folder")
 
                         with gr.Row():
-                            num_proc_slider = gr.Slider(minimum=1, maximum=8, value=2, step=1, label="CPU Worker Processes (num_proc)")
+                            num_proc_slider = gr.Slider(minimum=1, maximum=8, value=2, step=1, label="Mel CPU Workers (num_proc)")
                             dataloader_workers_slider = gr.Slider(minimum=0, maximum=8, value=2, step=1, label="DataLoader Workers")
 
-                        verify_data_btn = gr.Button("🔍 Verify Dataset Files & Audio Integrity", size="sm", variant="secondary")
+                        verify_data_btn = gr.Button("🔍 Verify Dataset Integrity", size="sm", variant="secondary")
                         data_verify_output = gr.Markdown()
                         verify_data_btn.click(
                             fn=validate_training_dataset_gui,
@@ -1429,12 +1457,12 @@ with gr.Blocks(title="Bangla & English ASR - Whisper") as demo:
                             outputs=[data_verify_output]
                         )
 
-                    # Section 3: Batching & Memory Optimization
+                    # 3. Batching & Compute
                     with gr.Accordion("⚡ 3. Batching & Memory Optimization", open=True):
                         with gr.Row():
-                            train_batch_slider = gr.Slider(minimum=1, maximum=64, value=8, step=1, label="Per-Device Train Batch Size")
-                            eval_batch_slider = gr.Slider(minimum=1, maximum=64, value=8, step=1, label="Per-Device Eval Batch Size")
-                            grad_accum_slider = gr.Slider(minimum=1, maximum=32, value=2, step=1, label="Gradient Accumulation Steps")
+                            train_batch_slider = gr.Slider(minimum=1, maximum=64, value=8, step=1, label="Train Batch Size")
+                            eval_batch_slider = gr.Slider(minimum=1, maximum=64, value=8, step=1, label="Eval Batch Size")
+                            grad_accum_slider = gr.Slider(minimum=1, maximum=32, value=2, step=1, label="Grad Accum Steps")
 
                         batch_info_display = gr.Markdown("💡 **Effective Batch Size**: `8 × 2 = 16 samples per step`")
 
@@ -1448,12 +1476,12 @@ with gr.Blocks(title="Bangla & English ASR - Whisper") as demo:
                             precision_radio = gr.Radio(
                                 choices=["FP16 Mixed Precision", "BF16 (Ampere/Ada)", "FP32 (Standard)"],
                                 value="FP16 Mixed Precision",
-                                label="Compute Precision"
+                                label="Precision"
                             )
-                            grad_ckpt_check = gr.Checkbox(value=True, label="Enable Gradient Checkpointing (Saves VRAM)")
+                            grad_ckpt_check = gr.Checkbox(value=True, label="Gradient Checkpointing")
 
-                    # Section 4: Parameter-Efficient Fine-Tuning (PEFT / LoRA / QLoRA)
-                    with gr.Accordion("🧩 4. LoRA / QLoRA & Quantization Parameters", open=True):
+                    # 4. LoRA / QLoRA
+                    with gr.Accordion("🧩 4. LoRA / QLoRA Architecture", open=False):
                         finetune_mode_radio = gr.Radio(
                             choices=[
                                 "LoRA (Parameter-Efficient PEFT) - Recommended",
@@ -1461,67 +1489,55 @@ with gr.Blocks(title="Bangla & English ASR - Whisper") as demo:
                                 "Full Model Fine-Tuning"
                             ],
                             value="LoRA (Parameter-Efficient PEFT) - Recommended",
-                            label="Fine-Tuning Architecture Mode"
+                            label="Fine-Tuning Mode"
                         )
 
                         with gr.Row():
                             lora_r_slider = gr.Slider(minimum=4, maximum=128, value=32, step=4, label="LoRA Rank (r)")
-                            lora_alpha_slider = gr.Slider(minimum=8, maximum=256, value=64, step=8, label="LoRA Alpha (scaling)")
+                            lora_alpha_slider = gr.Slider(minimum=8, maximum=256, value=64, step=8, label="LoRA Alpha")
                             lora_dropout_slider = gr.Slider(minimum=0.0, maximum=0.2, value=0.05, step=0.01, label="LoRA Dropout")
 
                         lora_target_box = gr.Textbox(
                             value="q_proj,v_proj",
-                            label="LoRA Target Attention Modules (comma-separated)",
+                            label="LoRA Attention Modules (comma-separated)",
                             placeholder="q_proj,v_proj or q_proj,k_proj,v_proj,out_proj,fc1,fc2"
                         )
 
-                    # Section 5: Optimizer & Learning Rate Schedule
+                    # 5. Optimizer & Scheduler
                     with gr.Accordion("🎯 5. Optimizer, Learning Rate & Scheduler", open=False):
                         with gr.Row():
-                            optim_dropdown = gr.Dropdown(
-                                choices=["adamw_torch", "adamw_bnb_8bit", "adafactor", "sgd"],
-                                value="adamw_torch",
-                                label="Optimizer"
-                            )
-                            lr_input = gr.Dropdown(
-                                choices=["1e-5", "3e-5", "5e-5", "1e-4", "2e-4", "5e-4"],
-                                value="1e-4",
-                                label="Learning Rate"
-                            )
-                            scheduler_dropdown = gr.Dropdown(
-                                choices=["linear", "cosine", "cosine_with_restarts", "polynomial", "constant_with_warmup"],
-                                value="linear",
-                                label="LR Scheduler Type"
-                            )
+                            optim_dropdown = gr.Dropdown(choices=["adamw_torch", "adamw_bnb_8bit", "adafactor", "sgd"], value="adamw_torch", label="Optimizer")
+                            lr_input = gr.Dropdown(choices=["1e-5", "3e-5", "5e-5", "1e-4", "2e-4", "5e-4"], value="1e-4", label="Learning Rate")
+                            scheduler_dropdown = gr.Dropdown(choices=["linear", "cosine", "cosine_with_restarts", "constant_with_warmup"], value="linear", label="Scheduler")
 
                         with gr.Row():
                             warmup_slider = gr.Slider(minimum=0, maximum=500, value=50, step=10, label="Warmup Steps")
                             weight_decay_slider = gr.Slider(minimum=0.0, maximum=0.2, value=0.01, step=0.005, label="Weight Decay")
-                            max_grad_norm_slider = gr.Slider(minimum=0.1, maximum=5.0, value=1.0, step=0.1, label="Max Gradient Norm (Clipping)")
+                            max_grad_norm_slider = gr.Slider(minimum=0.1, maximum=5.0, value=1.0, step=0.1, label="Max Grad Norm")
 
-                    # Section 6: Training Duration & Checkpointing Schedule
-                    with gr.Accordion("⏱️ 6. Training Duration, Steps & Checkpointing", open=False):
+                    # 6. Duration & Checkpointing
+                    with gr.Accordion("⏱️ 6. Duration, Steps & Checkpointing", open=False):
                         with gr.Row():
                             epochs_slider = gr.Slider(minimum=1, maximum=30, value=5, step=1, label="Total Epochs")
-                            max_steps_box = gr.Number(value=-1, label="Max Steps (-1 for full epochs, >0 overrides epochs)")
+                            max_steps_box = gr.Number(value=-1, label="Max Steps (-1 for full epochs)")
 
                         with gr.Row():
-                            eval_steps_box = gr.Number(value=200, label="Evaluation Frequency (steps)")
-                            save_steps_box = gr.Number(value=200, label="Checkpoint Save Frequency (steps)")
+                            eval_steps_box = gr.Number(value=200, label="Eval Steps")
+                            save_steps_box = gr.Number(value=200, label="Save Steps")
                             logging_steps_box = gr.Number(value=25, label="Logging Steps")
-                            save_limit_box = gr.Number(value=2, label="Max Checkpoints to Keep")
+                            save_limit_box = gr.Number(value=2, label="Max Checkpoints")
 
                         with gr.Row():
-                            best_metric_dropdown = gr.Dropdown(choices=["wer", "cer", "loss"], value="wer", label="Metric for Best Model Selection")
-                            report_to_dropdown = gr.Dropdown(choices=["tensorboard", "none", "wandb"], value="tensorboard", label="Dashboard Logger")
+                            best_metric_dropdown = gr.Dropdown(choices=["wer", "cer", "loss"], value="wer", label="Best Model Metric")
+                            report_to_dropdown = gr.Dropdown(choices=["tensorboard", "none", "wandb"], value="tensorboard", label="Logger")
 
-                        output_dir_box = gr.Textbox(value="./checkpoints/whisper_bangla_lora", label="Output Checkpoint Save Directory")
+                        output_dir_box = gr.Textbox(value="./checkpoints/whisper_bangla_lora", label="Checkpoint Output Directory")
 
-                    # Section 7: Evaluation Generation & Decoding
-                    with gr.Accordion("🎙️ 7. Evaluation Generation & Decoding Parameters", open=False):
+                    # 7. Evaluation Generation
+                    with gr.Accordion("🎙️ 7. Evaluation Generation Decoding", open=False):
                         with gr.Row():
-                            gen_len_slider = gr.Slider(minimum=64, maximum=448, value=225, step=1, label="Generation Max Length (tokens)")
-                            gen_beams_slider = gr.Slider(minimum=1, maximum=5, value=1, step=1, label="Generation Num Beams (1 for fast eval)")
+                            gen_len_slider = gr.Slider(minimum=64, maximum=448, value=225, step=1, label="Generation Max Tokens")
+                            gen_beams_slider = gr.Slider(minimum=1, maximum=5, value=1, step=1, label="Generation Beams")
 
                     # Auto-adaptation of hyperparameters on model change
                     base_model_dropdown.change(
@@ -1544,20 +1560,20 @@ with gr.Blocks(title="Bangla & English ASR - Whisper") as demo:
                     )
 
                     with gr.Row():
-                        train_btn = gr.Button("🚀 Launch Batched Training", variant="primary", size="lg", scale=2)
-                        train_stop_btn = gr.Button("🛑 Abort Training", variant="stop", size="lg", scale=1)
+                        train_btn = gr.Button("🚀 Launch Batched Training", variant="primary", size="sm", scale=2)
+                        train_stop_btn = gr.Button("🛑 Abort Training", variant="stop", size="sm", scale=1)
 
-                    with gr.Accordion("📋 View Complete Equivalent CLI Command", open=False):
-                        cli_code_output = gr.Code(language="shell", label="Command for Remote Servers / Cloud Clusters")
+                    with gr.Accordion("📋 View CLI Command", open=False):
+                        cli_code_output = gr.Code(language="shell", label="Command for Remote Servers / Cloud")
                         show_cmd_btn = gr.Button("Generate Command", size="sm", variant="secondary")
 
                 # Right Column: Live Terminal & Training Console
                 with gr.Column(scale=1):
-                    train_status_banner = gr.HTML(value="<div style='color: #64748b; font-size: 0.95rem;'>Ready to train. Configure parameters and press <b>Launch Batched Training</b>.</div>")
+                    train_status_banner = gr.HTML(value="<div style='color: #64748b; font-size: 0.85rem;'>Ready to train. Press <b>Launch Batched Training</b>.</div>")
                     train_log_box = gr.Textbox(
-                        label="🖥️ Live Training Console & Loss Output",
-                        lines=28,
-                        placeholder="Training output, step loss, evaluation WER/CER, and checkpoint notifications will stream here live...",
+                        label="🖥️ Live Console & Loss Output",
+                        lines=16,
+                        placeholder="Training output, step loss, evaluation WER/CER, and checkpoints will stream here...",
                         elem_classes=["console-log"]
                     )
 
@@ -1589,11 +1605,11 @@ with gr.Blocks(title="Bangla & English ASR - Whisper") as demo:
             )
 
         # ======================================================================
-        # TAB 5: System Diagnostics & Health Check
+        # TAB 5: System Diagnostics & Health Check (Compact)
         # ======================================================================
-        with gr.TabItem("🖥️ System Diagnostics & Cache"):
+        with gr.TabItem("🖥️ Diagnostics"):
             diag_output = gr.Markdown(value=get_diagnostics())
-            refresh_diag_btn = gr.Button("🔄 Refresh Diagnostics", variant="secondary")
+            refresh_diag_btn = gr.Button("🔄 Refresh Diagnostics", size="sm", variant="secondary")
             refresh_diag_btn.click(fn=get_diagnostics, outputs=[diag_output])
 
 if __name__ == "__main__":
