@@ -1,6 +1,5 @@
---extra-index-url https://download.pytorch.org/whl/cpu
-torch
-faster-whisper
+torch>=2.0.0
+faster-whisper>=1.0.0
 soundfile
 librosa
 jiwer

@@ -130,6 +130,14 @@ def main():
     tokenizer = WhisperTokenizer.from_pretrained(args.model_name_or_path, language=args.language, task=args.task)
     processor = WhisperProcessor.from_pretrained(args.model_name_or_path, language=args.language, task=args.task)
 
+    is_cuda = torch.cuda.is_available()
+    is_mps = hasattr(torch.backends, "mps") and torch.backends.mps.is_available()
+
+    if args.use_qlora and not is_cuda:
+        print("⚠️ Warning: QLoRA (4-bit bitsandbytes) requires an NVIDIA CUDA GPU. Falling back to standard LoRA on current platform.")
+        args.use_qlora = False
+        args.use_lora = True
+
     load_kwargs = {}
     if args.use_qlora:
         try:
@@ -202,6 +210,15 @@ def main():
     eval_strat_key = "eval_strategy" if "eval_strategy" in inspect.signature(Seq2SeqTrainingArguments.__init__).parameters else "evaluation_strategy"
     eval_kwargs = {eval_strat_key: "steps"}
 
+    use_fp16 = args.fp16 and is_cuda
+    use_bf16 = args.bf16 and (is_cuda or is_mps)
+
+    if args.fp16 and not is_cuda:
+        print("⚠️ Notice: FP16 is only supported on NVIDIA CUDA GPUs. Falling back to FP32.")
+
+    if is_mps:
+        print("ℹ️ Device: Apple Silicon Metal Performance Shaders (MPS) active.")
+
     training_args = Seq2SeqTrainingArguments(
         output_dir=args.output_dir,
         per_device_train_batch_size=args.batch_size,
@@ -216,8 +233,8 @@ def main():
         num_train_epochs=args.num_epochs,
         max_steps=args.max_steps,
         gradient_checkpointing=args.gradient_checkpointing,
-        fp16=args.fp16,
-        bf16=args.bf16,
+        fp16=use_fp16,
+        bf16=use_bf16,
         dataloader_num_workers=args.dataloader_num_workers,
         predict_with_generate=True,
         generation_max_length=args.generation_max_length,

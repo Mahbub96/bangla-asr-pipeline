@@ -83,13 +83,27 @@ python scripts/prepare_data.py --validate --csv data/test/metadata.csv --audio_d
 
 ## 🚀 Quick Start (Local Machine)
 
-### 1. Environment Setup
+### 1. System Requirements & Setup
+
+#### On Ubuntu / Debian:
 ```bash
-# Create virtual environment
+# Install system audio codec
+sudo apt update && sudo apt install -y ffmpeg
+
+# Create virtual environment & install dependencies
 python3 -m venv .venv
 source .venv/bin/activate
+pip install -r requirements.txt
+```
 
-# Install local testing dependencies
+#### On macOS (Apple Silicon M1 / M2 / M3 / M4):
+```bash
+# Install system audio codec via Homebrew
+brew install ffmpeg
+
+# Create virtual environment & install dependencies
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
 ```
 

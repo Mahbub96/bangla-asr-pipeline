@@ -26,9 +26,9 @@ from pathlib import Path
 import gradio as gr
 import pandas as pd
 
-# Add scripts directory to path
+# Prioritize local scripts directory to avoid package name collisions (e.g. evaluate)
 SCRIPT_DIR = Path(__file__).parent.resolve()
-sys.path.append(str(SCRIPT_DIR / "scripts"))
+sys.path.insert(0, str(SCRIPT_DIR / "scripts"))
 
 from transcribe import get_transcriber, transcribe_file
 from evaluate import compute_metrics
@@ -122,25 +122,39 @@ MODEL_PRESETS = {
 }
 
 def get_system_device_info():
-    """Detects available hardware acceleration (CPU or CUDA)."""
+    """Detects available hardware acceleration (NVIDIA CUDA, Apple Silicon MPS, or Multi-Core CPU)."""
     try:
         import torch
         if torch.cuda.is_available():
             device_name = torch.cuda.get_device_name(0)
             vram_gb = torch.cuda.get_device_properties(0).total_memory / (1024**3)
-            return f"CUDA GPU: {device_name} ({vram_gb:.1f} GB VRAM)"
+            return f"NVIDIA CUDA GPU: {device_name} ({vram_gb:.1f} GB VRAM)"
+        elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+            import platform
+            chip = platform.processor() or platform.machine() or "Apple Silicon"
+            return f"Apple Silicon Metal (MPS): {chip}"
     except Exception:
         pass
     cpu_count = os.cpu_count() or 1
     return f"CPU: Multi-Core ({cpu_count} threads, INT8 CTranslate2)"
 
 def load_cached_model(model_name="large-v3-turbo"):
-    """Loads and caches model in memory."""
+    """Loads and caches model in memory with auto-detected hardware backend."""
     if model_name not in MODEL_CACHE:
+        device = "cpu"
+        compute_type = "int8"
+        try:
+            import torch
+            if torch.cuda.is_available():
+                device = "cuda"
+                compute_type = "float16"
+        except Exception:
+            pass
+
         MODEL_CACHE[model_name] = get_transcriber(
             model_size=model_name,
-            device="cpu",
-            compute_type="int8",
+            device=device,
+            compute_type=compute_type,
             download_root=str(SCRIPT_DIR / "models")
         )
     return MODEL_CACHE[model_name]
@@ -638,14 +652,26 @@ def on_eval_stop():
 # ==============================================================================
 def check_training_environment():
     checks = []
+    import shutil
+    import platform
+
+    # Check ffmpeg
+    if shutil.which("ffmpeg"):
+        checks.append("🟢 **Audio Codec**: `ffmpeg` binary detected and accessible in system PATH.")
+    else:
+        pkg_cmd = "brew install ffmpeg" if platform.system() == "Darwin" else "sudo apt update && sudo apt install -y ffmpeg"
+        checks.append(f"⚠️ **Audio Codec**: `ffmpeg` not found. Run `{pkg_cmd}` to ensure support for all audio containers.")
+
     try:
         import torch
         if torch.cuda.is_available():
             dev = torch.cuda.get_device_name(0)
             mem = torch.cuda.get_device_properties(0).total_memory / (1024**3)
             checks.append(f"🟢 **Compute Hardware**: NVIDIA CUDA GPU `{dev}` ({mem:.1f} GB VRAM) ready.")
+        elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+            checks.append(f"🟢 **Compute Hardware**: Apple Silicon Metal (MPS) detected on `{platform.machine()}`. Accelerated fine-tuning supported.")
         else:
-            checks.append("🟡 **Compute Hardware**: No CUDA GPU found (running in CPU mode). CPU can test small mini-batches, but fine-tuning `large-v3-turbo` requires a GPU (≥16GB VRAM recommended).")
+            checks.append("🟡 **Compute Hardware**: Running in CPU mode. Mini-batches & diagnostics work on CPU, but fine-tuning `large-v3-turbo` runs much faster on GPU or Apple Silicon MPS.")
     except Exception as e:
         checks.append(f"🔴 **Compute Hardware**: {e}")
 
@@ -950,6 +976,9 @@ def _is_pkg_installed(pkg_name):
 # Tab 5: System Diagnostics Handler
 # ==============================================================================
 def get_diagnostics():
+    import platform
+    import shutil
+
     models_dir = SCRIPT_DIR / "models"
     models_found = []
     if models_dir.exists():
@@ -960,10 +989,22 @@ def get_diagnostics():
     models_info = "\n".join(models_found) if models_found else "No pre-downloaded models found in `models/`."
     cached_in_ram = list(MODEL_CACHE.keys()) if MODEL_CACHE else ["None (loaded on demand)"]
 
+    has_cuda = False
+    try:
+        import torch
+        has_cuda = torch.cuda.is_available()
+    except Exception:
+        pass
+
+    engine_desc = "CTranslate2 FP16 (CUDA GPU-Accelerated)" if has_cuda else "CTranslate2 INT8 (CPU / Apple Accelerate Optimized)"
+    ffmpeg_stat = f"Available (`{shutil.which('ffmpeg')}`)" if shutil.which("ffmpeg") else "Not found in PATH"
+
     return f"""
 ### 🖥️ Hardware & Execution Environment
 - **Compute Device**: `{get_system_device_info()}`
-- **Quantization Engine**: `CTranslate2 INT8 (CPU-Optimized)`
+- **Operating System**: `{platform.system()} {platform.release()} ({platform.machine()})`
+- **Audio Codec (FFmpeg)**: {ffmpeg_stat}
+- **Inference Engine**: `{engine_desc}`
 - **Python Version**: `{sys.version.split()[0]}`
 - **Gradio Version**: `{gr.__version__}`
 
