@@ -43,6 +43,7 @@ data/**/audio/*
 
 # Evaluation output & experiment logs
 evaluation_results.csv
+test_transcriptions.json
 *.log
 runs/
 events.out.tfevents.*
