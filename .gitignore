@@ -1,0 +1,54 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# C extensions
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual Environments
+.venv/
+venv/
+ENV/
+env/
+
+# Pre-trained models and checkpoints (DO NOT COMMIT)
+models/
+checkpoints/
+output_*/
+*.pt
+*.pth
+*.bin
+*.safetensors
+*.onnx
+
+# Dataset audio binaries (preserve directory structure via .gitkeep)
+data/**/audio/*
+!data/**/audio/.gitkeep
+
+# Evaluation output & experiment logs
+evaluation_results.csv
+*.log
+runs/
+events.out.tfevents.*
+
+# OS and Editor specific
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

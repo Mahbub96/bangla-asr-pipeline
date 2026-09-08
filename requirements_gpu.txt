@@ -1,0 +1,15 @@
+# Dependencies for training Whisper on a GPU machine / Cloud server
+torch>=2.1.0
+transformers>=4.40.0
+datasets>=2.18.0
+accelerate>=0.28.0
+peft>=0.10.0
+bitsandbytes>=0.43.0
+jiwer>=3.0.0
+soundfile>=0.12.1
+librosa>=0.10.1
+pandas>=2.0.0
+tqdm>=4.66.0
+evaluate>=0.4.0
+scipy>=1.11.0
+tensorboard>=2.15.0
