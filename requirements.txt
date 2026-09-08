@@ -6,3 +6,4 @@ librosa
 jiwer
 pandas
 tqdm
+gradio

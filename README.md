@@ -73,6 +73,15 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
+### 1. Launch the Interactive Web UI (Recommended)
+You can launch the browser-based interface to record speech live, upload files, and view timestamps:
+```bash
+./run_ui.sh
+```
+Then open **http://localhost:7860** in your browser.
+
+---
+
 ### 2. Download Whisper Model
 Pre-download model weights locally (defaults to `large-v3-turbo`):
 ```bash
@@ -80,7 +89,7 @@ python scripts/download_model.py --model large-v3-turbo
 ```
 *(Options: `large-v3-turbo`, `large-v3`, `medium`, `small`, `base`, `tiny`)*
 
-### 3. Transcribe Audio
+### 3. CLI Audio Transcription
 Transcribe a single audio file with auto-detection or language specification:
 ```bash
 # Auto-detect language (Bangla or English)
