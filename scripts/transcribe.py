@@ -46,8 +46,33 @@ def transcribe_file(model, audio_path, language=None, beam_size=5):
     if not audio_path.is_file():
         raise FileNotFoundError(f"Audio file not found: {audio_path}")
 
-    # If language is 'auto', pass None to let whisper auto-detect
-    lang = None if (language in [None, "auto"]) else language
+    # Set of Indic languages Whisper often biases towards due to training data imbalance
+    INDIC_LANGS = {"hi", "bn", "ur", "as", "mr", "ne", "gu", "pa", "or", "sa"}
+
+    lang = language
+    detected_lang = None
+    lang_prob = None
+
+    if language in [None, "auto"]:
+        from faster_whisper import decode_audio
+        try:
+            audio_data = decode_audio(str(audio_path))
+            raw_lang, raw_prob, all_probs = model.detect_language(audio_data)
+            lang_dict = dict(all_probs)
+            indic_score = sum(lang_dict.get(l, 0.0) for l in INDIC_LANGS)
+            en_score = lang_dict.get("en", 0.0)
+
+            # In a Bangla/English pipeline, route any Indic phonetic speech directly to Bangla ('bn')
+            if indic_score >= en_score:
+                lang = "bn"
+                detected_lang = "bn (Bangla)"
+                lang_prob = indic_score
+            else:
+                lang = "en"
+                detected_lang = "en (English)"
+                lang_prob = en_score
+        except Exception:
+            lang = None  # Fallback to model's default
 
     start_time = time.time()
     segments, info = model.transcribe(
@@ -58,8 +83,9 @@ def transcribe_file(model, audio_path, language=None, beam_size=5):
         vad_parameters=dict(min_silence_duration_ms=500)
     )
 
-    detected_lang = info.language
-    lang_prob = info.language_probability
+    if detected_lang is None:
+        detected_lang = info.language
+        lang_prob = info.language_probability
     duration = info.duration
 
     collected_segments = []
