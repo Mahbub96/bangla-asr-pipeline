@@ -2,19 +2,20 @@
 """
 Bangla & English Automatic Speech Recognition (ASR) - Interactive Web Interface
 Features:
-- Live microphone recording & audio upload
-- Real-time streaming transcription with live chunk display
-- Instant Stop / Cancel button to abort any transcription immediately
+- Live microphone recording & audio upload with streaming recognition
+- Instant Stop / Cancel controls across all operations
 - Client-side one-click Copy to Clipboard
 - Smart Bilingual Language Routing (Indic phonetics -> Bangla, English -> English)
 - Export transcriptions to Plain Text (.txt), Subtitles (.srt, .vtt), and JSON (.json)
-- Streamed batch transcription via multi-file upload or server directory path with Stop support
-- Streamed dataset accuracy benchmark (WER & CER) with Stop support
+- Streamed batch transcription via multi-file upload or server directory path
+- Accuracy benchmarking (WER & CER) on ground-truth datasets
+- Batched Training / Fine-Tuning GUI with live console stream and Stop control
 - System diagnostics & model status inspector
 """
 
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import time
@@ -32,6 +33,9 @@ from evaluate import compute_metrics
 
 # Global model cache to avoid reloading weights on every inference
 MODEL_CACHE = {}
+
+# Active training subprocess tracker
+ACTIVE_TRAIN_PROC = None
 
 def get_system_device_info():
     """Detects available hardware acceleration (CPU or CUDA)."""
@@ -147,7 +151,6 @@ def transcribe_audio_streaming(audio_path, model_name, language_choice, beam_siz
         if not audio_p.is_file():
             raise FileNotFoundError(f"Audio file not found: {audio_path}")
 
-        # Smart Bilingual Language Detection
         INDIC_LANGS = {"hi", "bn", "ur", "as", "mr", "ne", "gu", "pa", "or", "sa"}
         target_lang = lang_code
         detected_lang = "bn (Bangla)" if lang_code == "bn" else ("en (English)" if lang_code == "en" else None)
@@ -197,7 +200,6 @@ def transcribe_audio_streaming(audio_path, model_name, language_choice, beam_siz
         collected_segments = []
         full_text_list = []
 
-        # Yield streaming chunks as they are recognized
         for seg in segments_gen:
             collected_segments.append({
                 "Start (s)": round(seg.start, 2),
@@ -209,7 +211,6 @@ def transcribe_audio_streaming(audio_path, model_name, language_choice, beam_siz
 
             current_text = " ".join(full_text_list)
             elapsed = time.time() - start_time
-            current_speed = round(seg.end / elapsed, 2) if elapsed > 0 else 1.0
 
             streaming_status = f"""
             <div style="background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 8px; padding: 10px 14px; margin-bottom: 8px;">
@@ -239,7 +240,6 @@ def transcribe_audio_streaming(audio_path, model_name, language_choice, beam_siz
                 gr.update(visible=False)
             )
 
-        # Final completion
         elapsed_total = time.time() - start_time
         final_speed = round(total_duration / elapsed_total, 2) if elapsed_total > 0 else 0
         final_text = " ".join(full_text_list).strip()
@@ -287,7 +287,6 @@ def transcribe_audio_streaming(audio_path, model_name, language_choice, beam_siz
             "segments": collected_segments
         }
 
-        # Exportable files
         txt_p = create_temp_export(final_text, ".txt")
         srt_p = create_temp_export(generate_srt(collected_segments), ".srt")
         vtt_p = create_temp_export(generate_vtt(collected_segments), ".vtt")
@@ -318,11 +317,9 @@ def transcribe_audio_streaming(audio_path, model_name, language_choice, beam_siz
         )
 
 def on_single_transcribe_stop():
-    """Callback when user clicks Stop / Cancel on single audio transcription."""
     return "<div style='color: #c2410c; font-weight: 600; padding: 10px 14px; background: #fff7ed; border-radius: 8px; border: 1px solid #fed7aa;'>🛑 Transcription stopped by user. You can modify audio, settings, or restart anytime.</div>"
 
 def on_single_clear():
-    """Resets all input and output fields in Tab 1."""
     return (
         None,
         "",
@@ -339,10 +336,6 @@ def on_single_clear():
 # Tab 2: Streaming Batch Audio Handler with Stop Support
 # ==============================================================================
 def batch_transcribe_streaming(input_mode, uploaded_files, directory_path, model_name, language_choice):
-    """
-    Generator yielding progressive batch transcription updates file-by-file.
-    Allows stopping midway while preserving all completed rows.
-    """
     valid_exts = {".wav", ".mp3", ".flac", ".ogg", ".m4a", ".aac"}
     audio_paths = []
 
@@ -409,7 +402,6 @@ def batch_transcribe_streaming(input_mode, uploaded_files, directory_path, model
         df_curr = pd.DataFrame(results)
         avg_speed = round(total_duration / total_proc_time, 2) if total_proc_time > 0 else 0
 
-        # Exportable files for current progress
         out_csv = create_temp_export(df_curr.to_csv(index=False), ".csv")
         out_json = create_temp_export(json.dumps(results, ensure_ascii=False, indent=2), ".json")
 
@@ -444,17 +436,12 @@ def batch_transcribe_streaming(input_mode, uploaded_files, directory_path, model
         )
 
 def on_batch_stop():
-    """Callback when user clicks Stop on batch transcription."""
     return "<div style='color: #c2410c; font-weight: 600; padding: 10px 14px; background: #fff7ed; border-radius: 8px; border: 1px solid #fed7aa;'>🛑 Batch processing stopped by user. Files completed so far are displayed below and ready to download.</div>"
 
 # ==============================================================================
 # Tab 3: Streaming Dataset Benchmark (WER / CER) with Stop Support
 # ==============================================================================
 def evaluate_dataset_streaming(csv_file_upload, metadata_csv_path, audio_dir, model_name, language_choice):
-    """
-    Generator yielding sample-by-sample benchmark updates with live WER & CER computation.
-    Can be stopped anytime without losing evaluated results.
-    """
     if csv_file_upload is not None:
         csv_p = Path(csv_file_upload.name if hasattr(csv_file_upload, 'name') else str(csv_file_upload))
     else:
@@ -569,14 +556,226 @@ def evaluate_dataset_streaming(csv_file_upload, metadata_csv_path, audio_dir, mo
         )
 
 def on_eval_stop():
-    """Callback when user clicks Stop on benchmark evaluation."""
     return "<div style='color: #c2410c; font-weight: 600; padding: 10px 14px; background: #fff7ed; border-radius: 8px; border: 1px solid #fed7aa;'>🛑 Benchmark stopped by user. Partial evaluation results and metrics are preserved below.</div>"
 
 # ==============================================================================
-# Tab 4: System Diagnostics Handler
+# Tab 4: Batched Audio Training / Fine-Tuning Manager
+# ==============================================================================
+def check_training_environment():
+    """Checks GPU hardware and training package availability."""
+    checks = []
+
+    # 1. Compute check
+    try:
+        import torch
+        if torch.cuda.is_available():
+            dev = torch.cuda.get_device_name(0)
+            mem = torch.cuda.get_device_properties(0).total_memory / (1024**3)
+            checks.append(f"🟢 **Compute Hardware**: NVIDIA CUDA GPU `{dev}` ({mem:.1f} GB VRAM) is ready.")
+        else:
+            checks.append("🟡 **Compute Hardware**: No CUDA GPU found (running in CPU mode). CPU can be used to test small mini-batches, but fine-tuning `large-v3-turbo` on full datasets requires a GPU (≥16GB VRAM recommended).")
+    except Exception as e:
+        checks.append(f"🔴 **Compute Hardware**: {e}")
+
+    # 2. Package dependencies check
+    missing = []
+    for pkg in ["transformers", "datasets", "peft", "accelerate", "evaluate"]:
+        try:
+            __import__(pkg)
+        except ImportError:
+            missing.append(pkg)
+
+    if missing:
+        checks.append(f"⚠️ **Missing Training Packages**: `{', '.join(missing)}`\n> **To install**: Run `pip install -r requirements_gpu.txt` in your terminal.")
+    else:
+        checks.append("🟢 **All Training Packages Installed**: `transformers`, `datasets`, `peft`, `accelerate`, and `evaluate` are installed.")
+
+    return "\n\n".join(checks)
+
+def validate_training_dataset_gui(train_csv, train_audio, val_csv, val_audio):
+    """Validates training and validation dataset files, counting audio files."""
+    report = []
+    for name, csv_path, audio_dir in [("Train Dataset", train_csv, train_audio), ("Validation Dataset", val_csv, val_audio)]:
+        p_csv = Path(csv_path)
+        if not p_csv.is_file():
+            report.append(f"❌ **{name}**: CSV not found at `{csv_path}`")
+            continue
+
+        try:
+            df = pd.read_csv(p_csv)
+            audio_col = next((c for c in ["audio_path", "audio", "file_name", "path"] if c in df.columns), None)
+            text_col = next((c for c in ["sentence", "transcription", "ground_truth", "text"] if c in df.columns), None)
+            if not audio_col or not text_col:
+                report.append(f"❌ **{name}**: CSV missing audio/text column. Columns detected: `{list(df.columns)}`")
+                continue
+
+            audio_base = Path(audio_dir)
+            existing = 0
+            for item in df[audio_col]:
+                target = audio_base / str(item)
+                if target.is_file() or Path(str(item)).is_file():
+                    existing += 1
+
+            missing = len(df) - existing
+            status_icon = "✅" if missing == 0 else ("⚠️" if existing > 0 else "❌")
+            report.append(f"{status_icon} **{name}**: `{existing} / {len(df)}` audio files verified ({missing} missing) in `{audio_dir}`.")
+        except Exception as err:
+            report.append(f"❌ **{name}**: Error reading CSV: {str(err)}")
+
+    return "\n\n".join(report)
+
+def build_cli_command(model_name, train_csv, train_audio, val_csv, val_audio, output_dir, language, batch_size, grad_accum, epochs, lr, use_lora, use_fp16):
+    """Builds the exact shell command to reproduce this training run."""
+    cmd = [
+        "python3 scripts/train_whisper.py",
+        f"--model_name_or_path \"{model_name}\"",
+        f"--train_csv \"{train_csv}\"",
+        f"--train_audio \"{train_audio}\"",
+        f"--val_csv \"{val_csv}\"",
+        f"--val_audio \"{val_audio}\"",
+        f"--output_dir \"{output_dir}\"",
+        f"--language \"{language}\"",
+        f"--batch_size {int(batch_size)}",
+        f"--gradient_accumulation_steps {int(grad_accum)}",
+        f"--num_epochs {int(epochs)}",
+        f"--learning_rate {lr}"
+    ]
+    if use_lora:
+        cmd.append("--use_lora")
+    if use_fp16:
+        cmd.append("--fp16")
+    return " \\\n    ".join(cmd)
+
+def start_training_gui(model_name, train_csv, train_audio, val_csv, val_audio, output_dir, language, batch_size, grad_accum, epochs, lr, finetune_mode, use_fp16):
+    """
+    Spawns scripts/train_whisper.py as a live subprocess and streams logs into the GUI.
+    """
+    global ACTIVE_TRAIN_PROC
+
+    # Check for active job
+    if ACTIVE_TRAIN_PROC and ACTIVE_TRAIN_PROC.poll() is None:
+        yield "⚠️ A training run is already in progress. Please stop it first.", "<div style='color: #ea580c;'>Training already active.</div>"
+        return
+
+    # Check dependencies
+    missing = [pkg for pkg in ["transformers", "datasets", "peft", "accelerate"] if not _is_pkg_installed(pkg)]
+    if missing:
+        error_txt = f"❌ Missing required packages for training: {', '.join(missing)}\nPlease run: pip install -r requirements_gpu.txt\n"
+        yield error_txt, f"<div style='color: #dc2626; font-weight: 600;'>{error_txt}</div>"
+        return
+
+    # Ensure dataset exists
+    if not Path(train_csv).is_file():
+        yield f"❌ Train CSV '{train_csv}' does not exist.", "<div style='color: #dc2626;'>Train CSV missing</div>"
+        return
+
+    use_lora = "LoRA" in finetune_mode
+    cmd = [
+        sys.executable,
+        str(SCRIPT_DIR / "scripts" / "train_whisper.py"),
+        "--model_name_or_path", model_name,
+        "--train_csv", train_csv,
+        "--train_audio", train_audio,
+        "--val_csv", val_csv,
+        "--val_audio", val_audio,
+        "--output_dir", output_dir,
+        "--language", language,
+        "--batch_size", str(int(batch_size)),
+        "--gradient_accumulation_steps", str(int(grad_accum)),
+        "--num_epochs", str(int(epochs)),
+        "--learning_rate", str(lr)
+    ]
+    if use_lora:
+        cmd.append("--use_lora")
+    if use_fp16:
+        cmd.append("--fp16")
+
+    effective_batch = int(batch_size) * int(grad_accum)
+    log_lines = [
+        "=" * 70,
+        f"🚀 INITIATING WHISPER BATCHED FINE-TUNING",
+        "=" * 70,
+        f"• Base Model          : {model_name}",
+        f"• Language Mode       : {language}",
+        f"• Per-Device Batch    : {int(batch_size)}",
+        f"• Gradient Accum Steps: {int(grad_accum)}",
+        f"• Effective Batch Size: {effective_batch}",
+        f"• Total Epochs        : {int(epochs)}",
+        f"• Learning Rate       : {lr}",
+        f"• Fine-Tuning Method  : {'LoRA (PEFT Adapter)' if use_lora else 'Full Model Fine-Tuning'}",
+        f"• Output Checkpoint   : {output_dir}",
+        "=" * 70,
+        "Launching training process...\n"
+    ]
+
+    status_html = f"<div style='background: #eff6ff; color: #1e40af; padding: 10px 14px; border-radius: 8px; border: 1px solid #93c5fd; font-weight: 600;'>⏳ Training running (Effective Batch Size: {effective_batch})...</div>"
+    yield "\n".join(log_lines), status_html
+
+    try:
+        env = os.environ.copy()
+        env["PYTHONUNBUFFERED"] = "1"
+
+        ACTIVE_TRAIN_PROC = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+            cwd=str(SCRIPT_DIR),
+            env=env
+        )
+
+        for line in iter(ACTIVE_TRAIN_PROC.stdout.readline, ""):
+            log_lines.append(line.rstrip())
+            if len(log_lines) > 300:
+                log_lines = log_lines[-300:]
+            yield "\n".join(log_lines), status_html
+
+        ACTIVE_TRAIN_PROC.stdout.close()
+        code = ACTIVE_TRAIN_PROC.wait()
+        ACTIVE_TRAIN_PROC = None
+
+        if code == 0:
+            log_lines.append(f"\n🎉 TRAINING FINISHED SUCCESSFULLY! Checkpoints stored in: {output_dir}")
+            final_status = "<div style='background: #ecfdf5; color: #065f46; padding: 10px 14px; border-radius: 8px; border: 1px solid #6ee7b7; font-weight: 600;'>✅ Training completed successfully!</div>"
+        else:
+            log_lines.append(f"\n⚠️ Process exited with return code: {code}")
+            final_status = f"<div style='background: #fff1f2; color: #9f1239; padding: 10px 14px; border-radius: 8px; border: 1px solid #fecdd3; font-weight: 600;'>⚠️ Training stopped or failed (exit code {code}).</div>"
+
+        yield "\n".join(log_lines), final_status
+
+    except Exception as e:
+        ACTIVE_TRAIN_PROC = None
+        err_str = f"\n❌ Failed to execute training subprocess: {str(e)}"
+        log_lines.append(err_str)
+        yield "\n".join(log_lines), f"<div style='color: #dc2626;'>{err_str}</div>"
+
+def stop_training_gui():
+    """Aborts the active training subprocess."""
+    global ACTIVE_TRAIN_PROC
+    if ACTIVE_TRAIN_PROC and ACTIVE_TRAIN_PROC.poll() is None:
+        try:
+            ACTIVE_TRAIN_PROC.terminate()
+            time.sleep(1)
+            if ACTIVE_TRAIN_PROC.poll() is None:
+                ACTIVE_TRAIN_PROC.kill()
+            ACTIVE_TRAIN_PROC = None
+            return "🛑 Training aborted by user.", "<div style='background: #fff7ed; color: #c2410c; padding: 10px 14px; border-radius: 8px; border: 1px solid #fed7aa; font-weight: 600;'>🛑 Training process terminated by user.</div>"
+        except Exception as err:
+            return f"Error stopping training: {err}", f"<div style='color: #dc2626;'>{err}</div>"
+    return "No active training process found.", "<div style='color: #64748b;'>Idle - No training process active.</div>"
+
+def _is_pkg_installed(pkg_name):
+    try:
+        __import__(pkg_name)
+        return True
+    except ImportError:
+        return False
+
+# ==============================================================================
+# Tab 5: System Diagnostics Handler
 # ==============================================================================
 def get_diagnostics():
-    """Returns real-time system status, loaded models, and disk cache info."""
     models_dir = SCRIPT_DIR / "models"
     models_found = []
     if models_dir.exists():
@@ -623,6 +822,16 @@ custom_css = """
     border-radius: 8px !important;
 }
 
+/* Console log styling */
+.console-log textarea {
+    font-family: 'JetBrains Mono', 'Fira Code', 'Courier New', monospace !important;
+    font-size: 0.88rem !important;
+    line-height: 1.5 !important;
+    background-color: #0f172a !important;
+    color: #38bdf8 !important;
+    border-radius: 8px !important;
+}
+
 /* Pulsing live streaming indicator */
 @keyframes pulse {
     0% { transform: scale(0.95); opacity: 0.8; }
@@ -655,7 +864,7 @@ with gr.Blocks(title="Bangla & English ASR - Whisper") as demo:
                     🎙️ Bangla & English Speech Recognition (ASR)
                 </h1>
                 <p style="font-size: 0.95rem; margin: 6px 0 0 0; opacity: 0.9;">
-                    High-accuracy speech-to-text with live streaming chunks, instant Stop / Cancel, and smart bilingual language routing.
+                    High-accuracy speech-to-text with live streaming chunks, batched audio training from GUI, and smart bilingual language routing.
                 </p>
             </div>
             <div style="display: flex; gap: 8px; flex-wrap: wrap;">
@@ -663,7 +872,7 @@ with gr.Blocks(title="Bangla & English ASR - Whisper") as demo:
                     🇧🇩 বাংলা & 🇬🇧 English
                 </span>
                 <span style="background: rgba(255,255,255,0.18); padding: 5px 12px; border-radius: 20px; font-size: 0.8rem; font-weight: 600; backdrop-filter: blur(4px);">
-                    ⚡ INT8 CTranslate2
+                    ⚡ INT8 Inference & LoRA Training
                 </span>
                 <span style="background: rgba(255,255,255,0.18); padding: 5px 12px; border-radius: 20px; font-size: 0.8rem; font-weight: 600; backdrop-filter: blur(4px);">
                     🚀 large-v3-turbo
@@ -679,7 +888,6 @@ with gr.Blocks(title="Bangla & English ASR - Whisper") as demo:
         # ======================================================================
         with gr.TabItem("🎯 Live Mic & Audio File Transcription"):
             with gr.Row():
-                # Left Column: Inputs & Controls
                 with gr.Column(scale=1):
                     audio_input = gr.Audio(
                         sources=["microphone", "upload"],
@@ -734,13 +942,11 @@ with gr.Blocks(title="Bangla & English ASR - Whisper") as demo:
                             lines=1
                         )
 
-                    # Action Control Buttons
                     with gr.Row():
                         transcribe_btn = gr.Button("🚀 Transcribe Speech", variant="primary", size="lg", scale=2)
                         stop_btn = gr.Button("🛑 Stop / Cancel", variant="stop", size="lg", scale=1)
                         clear_btn = gr.Button("🗑️ Clear", variant="secondary", size="lg", scale=1)
 
-                    # Dynamic Quick Test Samples
                     candidate_samples = [
                         "data/test/audio/test.mp3",
                         "data/test/audio/test_done/test.mp3",
@@ -774,7 +980,6 @@ with gr.Blocks(title="Bangla & English ASR - Whisper") as demo:
                             label="📁 Quick Test Samples"
                         )
 
-                # Right Column: Outputs & Export Suite
                 with gr.Column(scale=1):
                     with gr.Row():
                         gr.Markdown("#### 📝 Transcribed Output")
@@ -790,7 +995,6 @@ with gr.Blocks(title="Bangla & English ASR - Whisper") as demo:
 
                     metrics_output = gr.HTML()
 
-                    # Export Suite Bar
                     gr.Markdown("##### 💾 Download & Subtitle Exports")
                     with gr.Row():
                         download_txt = gr.DownloadButton("📄 Text (.txt)", visible=False, size="sm")
@@ -808,14 +1012,12 @@ with gr.Blocks(title="Bangla & English ASR - Whisper") as demo:
                     with gr.Accordion("🔍 Full JSON Metadata", open=False):
                         json_output = gr.Code(language="json", label="Raw JSON Output")
 
-            # Streaming transcription event
             transcribe_event = transcribe_btn.click(
                 fn=transcribe_audio_streaming,
                 inputs=[audio_input, model_dropdown, lang_dropdown, beam_slider, temp_slider, prompt_input, vad_checkbox],
                 outputs=[output_text, metrics_output, segments_table, json_output, download_txt, download_srt, download_vtt, download_json]
             )
 
-            # Instant Stop / Cancel event
             stop_btn.click(
                 fn=on_single_transcribe_stop,
                 inputs=None,
@@ -823,14 +1025,12 @@ with gr.Blocks(title="Bangla & English ASR - Whisper") as demo:
                 cancels=[transcribe_event]
             )
 
-            # Client-side copy to clipboard
             copy_btn.click(
                 fn=None,
                 inputs=[output_text],
                 js="(text) => { if (text) { navigator.clipboard.writeText(text); } }"
             )
 
-            # Clear inputs and outputs
             clear_btn.click(
                 fn=on_single_clear,
                 outputs=[audio_input, output_text, metrics_output, segments_table, json_output, download_txt, download_srt, download_vtt, download_json],
@@ -984,7 +1184,156 @@ with gr.Blocks(title="Bangla & English ASR - Whisper") as demo:
             )
 
         # ======================================================================
-        # TAB 4: System Diagnostics & Health Check
+        # TAB 4: Batched Audio Training / Fine-Tuning GUI
+        # ======================================================================
+        with gr.TabItem("🏋️ Train / Fine-Tune (Batched)"):
+            gr.Markdown("""
+            ### 🏋️ Whisper Batched Audio Training & Fine-Tuning
+            Fine-tune Whisper models on customized Bengali and English speech datasets directly from this interface.
+            Supports **LoRA (Parameter-Efficient PEFT)** for fast training with modest VRAM, or **Full Fine-Tuning**.
+            """)
+
+            with gr.Accordion("🔍 Hardware Readiness & Dependencies Check", open=False):
+                train_env_markdown = gr.Markdown(value=check_training_environment())
+                check_env_btn = gr.Button("🔄 Re-Check GPU & Packages", size="sm", variant="secondary")
+                check_env_btn.click(fn=check_training_environment, outputs=[train_env_markdown])
+
+            with gr.Row():
+                # Left Column: Dataset & Hyperparameters
+                with gr.Column(scale=1):
+                    with gr.Accordion("📁 1. Dataset Paths", open=True):
+                        train_csv_box = gr.Textbox(
+                            value="data/train/metadata.csv",
+                            label="Train Metadata CSV Path"
+                        )
+                        train_audio_box = gr.Textbox(
+                            value="data/train/audio",
+                            label="Train Audio Directory"
+                        )
+                        val_csv_box = gr.Textbox(
+                            value="data/val/metadata.csv",
+                            label="Validation Metadata CSV Path"
+                        )
+                        val_audio_box = gr.Textbox(
+                            value="data/val/audio",
+                            label="Validation Audio Directory"
+                        )
+                        verify_data_btn = gr.Button("🔍 Verify Dataset Paths & Counts", size="sm", variant="secondary")
+                        data_verify_output = gr.Markdown()
+                        verify_data_btn.click(
+                            fn=validate_training_dataset_gui,
+                            inputs=[train_csv_box, train_audio_box, val_csv_box, val_audio_box],
+                            outputs=[data_verify_output]
+                        )
+
+                    with gr.Accordion("⚙️ 2. Model & Batching Hyperparameters", open=True):
+                        base_model_dropdown = gr.Dropdown(
+                            choices=[
+                                "openai/whisper-large-v3-turbo",
+                                "openai/whisper-large-v3",
+                                "openai/whisper-small",
+                                "openai/whisper-base",
+                                "openai/whisper-tiny"
+                            ],
+                            value="openai/whisper-large-v3-turbo",
+                            label="Base Model Checkpoint"
+                        )
+                        target_lang_dropdown = gr.Dropdown(
+                            choices=["bengali", "english"],
+                            value="bengali",
+                            label="Target Language"
+                        )
+
+                        with gr.Row():
+                            train_batch_slider = gr.Slider(
+                                minimum=1,
+                                maximum=32,
+                                value=8,
+                                step=1,
+                                label="Per-Device Batch Size"
+                            )
+                            grad_accum_slider = gr.Slider(
+                                minimum=1,
+                                maximum=16,
+                                value=2,
+                                step=1,
+                                label="Gradient Accumulation Steps"
+                            )
+
+                        batch_info_display = gr.Markdown("💡 **Effective Batch Size**: `8 × 2 = 16 samples per optimization step`")
+
+                        def update_effective_batch(b, g):
+                            return f"💡 **Effective Batch Size**: `{int(b)} × {int(g)} = {int(b) * int(g)} samples per optimization step`"
+
+                        train_batch_slider.change(fn=update_effective_batch, inputs=[train_batch_slider, grad_accum_slider], outputs=[batch_info_display])
+                        grad_accum_slider.change(fn=update_effective_batch, inputs=[train_batch_slider, grad_accum_slider], outputs=[batch_info_display])
+
+                        with gr.Row():
+                            epochs_slider = gr.Slider(
+                                minimum=1,
+                                maximum=30,
+                                value=5,
+                                step=1,
+                                label="Total Epochs"
+                            )
+                            lr_dropdown = gr.Dropdown(
+                                choices=["1e-5", "5e-5", "1e-4", "2e-4"],
+                                value="1e-4",
+                                label="Learning Rate"
+                            )
+
+                        finetune_mode_radio = gr.Radio(
+                            choices=["LoRA (Parameter-Efficient PEFT) - Recommended", "Full Model Fine-Tuning"],
+                            value="LoRA (Parameter-Efficient PEFT) - Recommended",
+                            label="Fine-Tuning Architecture"
+                        )
+
+                        with gr.Row():
+                            fp16_check = gr.Checkbox(
+                                value=True,
+                                label="FP16 Mixed Precision (recommended on GPU)"
+                            )
+                            output_dir_box = gr.Textbox(
+                                value="./checkpoints/whisper_bangla_lora",
+                                label="Checkpoint Save Directory"
+                            )
+
+                    with gr.Row():
+                        train_btn = gr.Button("🚀 Launch Batched Training", variant="primary", size="lg", scale=2)
+                        train_stop_btn = gr.Button("🛑 Abort Training", variant="stop", size="lg", scale=1)
+
+                    with gr.Accordion("📋 View Equivalent CLI Shell Command", open=False):
+                        cli_code_output = gr.Code(language="shell", label="Command for Remote Servers")
+                        show_cmd_btn = gr.Button("Generate Command", size="sm", variant="secondary")
+                        show_cmd_btn.click(
+                            fn=build_cli_command,
+                            inputs=[base_model_dropdown, train_csv_box, train_audio_box, val_csv_box, val_audio_box, output_dir_box, target_lang_dropdown, train_batch_slider, grad_accum_slider, epochs_slider, lr_dropdown, finetune_mode_radio, fp16_check],
+                            outputs=[cli_code_output]
+                        )
+
+                # Right Column: Live Terminal & Training Console
+                with gr.Column(scale=1):
+                    train_status_banner = gr.HTML(value="<div style='color: #64748b; font-size: 0.95rem;'>Ready to train. Configure datasets and press <b>Launch Batched Training</b>.</div>")
+                    train_log_box = gr.Textbox(
+                        label="🖥️ Live Training Console & Loss Output",
+                        lines=22,
+                        placeholder="Training output, step loss, evaluation WER/CER, and checkpoint notifications will stream here live...",
+                        elem_classes=["console-log"]
+                    )
+
+            train_btn.click(
+                fn=start_training_gui,
+                inputs=[base_model_dropdown, train_csv_box, train_audio_box, val_csv_box, val_audio_box, output_dir_box, target_lang_dropdown, train_batch_slider, grad_accum_slider, epochs_slider, lr_dropdown, finetune_mode_radio, fp16_check],
+                outputs=[train_log_box, train_status_banner]
+            )
+
+            train_stop_btn.click(
+                fn=stop_training_gui,
+                outputs=[train_log_box, train_status_banner]
+            )
+
+        # ======================================================================
+        # TAB 5: System Diagnostics & Health Check
         # ======================================================================
         with gr.TabItem("🖥️ System Diagnostics & Cache"):
             diag_output = gr.Markdown(value=get_diagnostics())

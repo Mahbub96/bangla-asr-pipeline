@@ -64,19 +64,27 @@ def load_data_from_csv(csv_path, audio_dir):
     return dataset
 
 def main():
+    try:
+        sys.stdout.reconfigure(line_buffering=True)
+    except Exception:
+        pass
+
     parser = argparse.ArgumentParser(description="Fine-tune Whisper on Bangla/English speech data.")
     parser.add_argument("--model_name_or_path", default="openai/whisper-large-v3-turbo", help="Base model checkpoint.")
     parser.add_argument("--train_csv", default="data/train/metadata.csv", help="Training metadata CSV.")
     parser.add_argument("--train_audio", default="data/train/audio", help="Training audio folder.")
     parser.add_argument("--val_csv", default="data/val/metadata.csv", help="Validation metadata CSV.")
     parser.add_argument("--val_audio", default="data/val/audio", help="Validation audio folder.")
-    parser.add_argument("--output_dir", default="./output_whisper_bangla", help="Directory to save fine-tuned checkpoints.")
+    parser.add_argument("--output_dir", default="./checkpoints/whisper_bangla_lora", help="Directory to save fine-tuned checkpoints.")
     parser.add_argument("--language", default="bengali", help="Language name for Whisper tokenizer ('bengali' or 'english').")
     parser.add_argument("--use_lora", action="store_true", help="Enable LoRA parameter-efficient fine-tuning (recommended for single GPU).")
     parser.add_argument("--batch_size", type=int, default=8, help="Per-device train batch size.")
     parser.add_argument("--gradient_accumulation_steps", type=int, default=2, help="Gradient accumulation steps.")
-    parser.add_argument("--learning_rate", type=float, default=1e-5, help="Learning rate.")
+    parser.add_argument("--learning_rate", type=float, default=1e-4, help="Learning rate.")
     parser.add_argument("--num_epochs", type=int, default=5, help="Total training epochs.")
+    parser.add_argument("--eval_steps", type=int, default=200, help="Evaluation frequency in steps.")
+    parser.add_argument("--save_steps", type=int, default=200, help="Checkpoint save frequency in steps.")
+    parser.add_argument("--logging_steps", type=int, default=25, help="Logging frequency in steps.")
     parser.add_argument("--fp16", action="store_true", default=torch.cuda.is_available(), help="Use FP16 mixed precision on GPU.")
 
     args = parser.parse_args()
@@ -135,27 +143,31 @@ def main():
         cer = 100 * cer_metric.compute(predictions=pred_str, references=label_str)
         return {"wer": wer, "cer": cer}
 
+    import inspect
+    eval_strat_key = "eval_strategy" if "eval_strategy" in inspect.signature(Seq2SeqTrainingArguments.__init__).parameters else "evaluation_strategy"
+    eval_kwargs = {eval_strat_key: "steps"}
+
     training_args = Seq2SeqTrainingArguments(
         output_dir=args.output_dir,
         per_device_train_batch_size=args.batch_size,
         gradient_accumulation_steps=args.gradient_accumulation_steps,
         learning_rate=args.learning_rate,
-        warmup_steps=100,
+        warmup_steps=50,
         num_train_epochs=args.num_epochs,
         gradient_checkpointing=True,
         fp16=args.fp16,
-        evaluation_strategy="steps",
         per_device_eval_batch_size=args.batch_size,
         predict_with_generate=True,
         generation_max_length=225,
-        save_steps=500,
-        eval_steps=500,
-        logging_steps=50,
+        save_steps=args.save_steps,
+        eval_steps=args.eval_steps,
+        logging_steps=args.logging_steps,
         save_total_limit=2,
         load_best_model_at_end=True,
         metric_for_best_model="wer",
         greater_is_better=False,
-        report_to=["tensorboard"]
+        report_to=["tensorboard"],
+        **eval_kwargs
     )
 
     trainer = Seq2SeqTrainer(
