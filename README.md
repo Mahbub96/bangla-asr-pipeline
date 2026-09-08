@@ -1,10 +1,27 @@
-# Bangla & English Automatic Speech Recognition (ASR)
+# Bangla & English Automatic Speech Recognition (ASR) Studio
 
-An end-to-end Automatic Speech Recognition (ASR) pipeline tailored for **Bangla (বাংলা)** and **English** speech, powered by OpenAI's Whisper (`large-v3-turbo` / `large-v3`).
+An end-to-end Automatic Speech Recognition (ASR) studio and scalable fine-tuning pipeline tailored for **Bangla (বাংলা)** and **English** speech, powered by OpenAI's Whisper (`large-v3-turbo` / `large-v3`).
 
 Designed with a dual-workflow architecture:
-1. **Local Machine:** Fast CPU-optimized testing, transcription, dataset preparation, and WER/CER evaluation via `faster-whisper` (CTranslate2 INT8).
-2. **GPU Training Cluster:** Scalable fine-tuning pipeline using Hugging Face `transformers`, `accelerate`, and Parameter-Efficient Fine-Tuning (`peft` / LoRA).
+1. **Local Machine / Edge Inference:** Fast CPU-optimized testing, live streaming transcription, dataset preparation, and WER/CER evaluation via `faster-whisper` (CTranslate2 INT8).
+2. **GPU Training Cluster & GUI Studio:** Scalable fine-tuning pipeline exposing all 36+ Hugging Face `transformers`, `accelerate`, and Parameter-Efficient Fine-Tuning (`peft` / LoRA / QLoRA 4-bit) parameters directly through an interactive Gradio Web UI or CLI.
+
+---
+
+## 🌟 Key Features & Highlights
+
+- **🎙️ Live Streaming Audio Studio**: Real-time microphone and file transcription with live chunk streaming, instant `🛑 Stop` button, and clipboard copy.
+- **📄 Multi-Format Subtitle & Text Export**: One-click download in `.txt`, `.srt` (SubRip), `.vtt` (WebVTT), and `.json` formats with precise timestamps.
+- **📂 Batch Audio Transcription**: Drag-and-drop multiple audio files or process entire server directories concurrently with live streaming tables and CSV/JSON export.
+- **📊 Benchmark Suite**: Automated Word Error Rate (WER) and Character Error Rate (CER) calculation against ground-truth CSVs with error breakdown tables.
+- **🏋️ Batched Audio Training Studio (36+ Parameters)**:
+  - Complete GUI exposing every Whisper training parameter (LoRA rank/alpha/dropout, target modules, QLoRA 4-bit, gradient checkpointing, mixed precision, LR schedulers, warmup, evaluation steps, beam search decoding).
+  - **Dynamic Model-Adaptive Presets**: Changing the base model (`large-v3-turbo`, `large-v3`, `medium`, `small`, `base`, `tiny`) automatically tunes optimal batch sizes, gradient accumulation, precision, and LoRA ranks.
+  - **Live Subprocess Console**: Real-time terminal output streaming loss, WER/CER, and checkpoints with an instant `🛑 Abort Training` button.
+  - **Dataset Integrity Verifier**: Pre-flight validation of audio existence, sample rates, and transcripts.
+  - **CLI Command Generator**: Generates equivalent copy-paste commands ready for remote headless cloud clusters (RunPod, Lambda Labs, AWS).
+- **🖥️ System Diagnostics**: Real-time GPU detection, CUDA VRAM monitor, and package dependency health checks.
+- **📱 Compact Single-Screen Layout (`100vh`)**: Optimized full display height dashboard with zero window-level scrolling, internal smooth scrolling, and sleek slim scrollbars.
 
 ---
 
@@ -12,7 +29,7 @@ Designed with a dual-workflow architecture:
 
 ```text
 Bangla ASR/
-├── app.py                   # Gradio Web UI (microphone, file upload, benchmarks)
+├── app.py                   # Full Gradio 6 Web UI Studio (5 compact tabs)
 ├── run_ui.sh                # Shell launcher for Web UI
 ├── start.sh                 # Quick CLI test runner script
 ├── data/
@@ -32,7 +49,7 @@ Bangla ASR/
 │   ├── prepare_data.py      # Directory setup and dataset validator
 │   ├── create_test_audio.py # Generates test audio samples
 │   ├── download_model.py    # Model weight downloader
-│   ├── train_whisper.py     # GPU training / LoRA fine-tuning script
+│   ├── train_whisper.py     # Scalable GPU training script (36+ CLI options)
 │   └── run_train_gpu.sh     # Shell launcher for remote GPU execution
 ├── requirements.txt         # Dependencies for local testing & Web UI
 ├── requirements_gpu.txt     # Dependencies for GPU training cluster
@@ -76,12 +93,17 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### 2. Launch the Interactive Web UI (Recommended)
-You can launch the browser-based interface to record speech live, upload files, and view timestamps:
+### 2. Launch the Interactive Web UI Studio
+Launch the browser-based dashboard:
 ```bash
 ./run_ui.sh
 ```
-Then open **http://localhost:7860** in your browser.
+Then open **http://localhost:7860** in your browser to access:
+- **🎯 Live Mic & Audio**: Real-time transcription with streaming text, audio playback, and instant stop controls.
+- **📂 Batch Audio**: Folder or multi-file audio batch processing with live streaming tables.
+- **📊 Benchmark (WER / CER)**: Error rate calculation and dataset validation against ground truth.
+- **🏋️ Batched Training**: Full training hyperparameter suite (36+ parameters) with live console logs.
+- **🖥️ Diagnostics**: Hardware acceleration and environment health check.
 
 ### 3. One-Click CLI Test Runner
 Run transcription directly across the test audio folder:
@@ -125,22 +147,26 @@ Outputs:
 
 ---
 
-## ⚡ Training on a Large Compute Machine (GPU)
+## ⚡ Training & Fine-Tuning (GPU Cluster & Cloud)
 
-When ready to train on a server or GPU cluster (e.g. RTX 3090/4090, A10G, A100):
+When training on a server or GPU cluster (e.g. RTX 3090/4090, A10G, A100, H100):
 
 ### 1. Install GPU Requirements
 ```bash
 pip install -r requirements_gpu.txt
 ```
 
-### 2. Launch Training
-Run the training script with LoRA (Parameter-Efficient Fine-Tuning):
+### 2. Launch Training via GUI or CLI
+
+#### Option A: Web UI Studio (Recommended)
+Navigate to the **🏋️ Batched Training** tab, select your base model to auto-adapt parameters, and click **🚀 Launch Batched Training**. You can inspect live step loss and metrics in the streaming terminal or click **🛑 Abort Training** at any time.
+
+#### Option B: Automated Shell Launcher
 ```bash
 bash scripts/run_train_gpu.sh
 ```
 
-Or customize hyperparameters directly:
+#### Option C: Full CLI Customization
 ```bash
 python scripts/train_whisper.py \
     --model_name_or_path "openai/whisper-large-v3-turbo" \
@@ -148,17 +174,44 @@ python scripts/train_whisper.py \
     --train_audio "data/train/audio" \
     --val_csv "data/val/metadata.csv" \
     --val_audio "data/val/audio" \
-    --output_dir "./checkpoints/whisper_bangla" \
+    --output_dir "./checkpoints/whisper_bangla_lora" \
     --language "bengali" \
+    --task "transcribe" \
     --use_lora \
+    --lora_r 32 \
+    --lora_alpha 64 \
+    --lora_dropout 0.05 \
+    --lora_target_modules "q_proj,v_proj" \
     --batch_size 8 \
+    --eval_batch_size 8 \
     --gradient_accumulation_steps 2 \
+    --fp16 \
+    --gradient_checkpointing \
+    --optim "adamw_torch" \
     --learning_rate 1e-4 \
-    --num_epochs 5
+    --lr_scheduler_type "linear" \
+    --warmup_steps 50 \
+    --weight_decay 0.01 \
+    --max_grad_norm 1.0 \
+    --num_epochs 5 \
+    --eval_steps 200 \
+    --save_steps 200 \
+    --save_total_limit 2 \
+    --metric_for_best_model "wer"
 ```
 
 ---
 
 ## ⚙️ Hardware Recommendations
-* **Local Machine:** Multi-core CPU (8+ threads), 8GB+ RAM. Runs INT8 inference fast.
-* **Large Compute / Training:** Single or multi-GPU with ≥16GB VRAM (24GB+ recommended for full `large-v3-turbo` fine-tuning).
+
+| Task | Minimum Specs | Recommended Specs |
+| :--- | :--- | :--- |
+| **Local Inference (INT8)** | 4-Core CPU, 8 GB RAM | 8+ Core CPU or RTX 3060+ (8 GB VRAM) |
+| **LoRA Fine-Tuning (`turbo`)** | NVIDIA GPU with 12 GB VRAM | RTX 3090 / 4090 / A10G (24 GB VRAM) |
+| **Full Parameter Training** | NVIDIA GPU with 24 GB VRAM | A100 (40GB/80GB) / H100 |
+
+---
+
+## 📄 License
+
+This project is open source and available under the Apache License 2.0.
