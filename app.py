@@ -9,7 +9,8 @@ Features:
 - Export transcriptions to Plain Text (.txt), Subtitles (.srt, .vtt), and JSON (.json)
 - Streamed batch transcription via multi-file upload or server directory path
 - Accuracy benchmarking (WER & CER) on ground-truth datasets
-- Batched Training / Fine-Tuning GUI with live console stream and Stop control
+- Comprehensive Batched Training / Fine-Tuning GUI with ALL model & training hyperparameters,
+  dynamic model-adaptive presets, live console streaming, and stop controls.
 - System diagnostics & model status inspector
 """
 
@@ -36,6 +37,88 @@ MODEL_CACHE = {}
 
 # Active training subprocess tracker
 ACTIVE_TRAIN_PROC = None
+
+# Model Architecture Adaptive Presets
+MODEL_PRESETS = {
+    "openai/whisper-large-v3-turbo": {
+        "batch_size": 8,
+        "eval_batch_size": 8,
+        "grad_accum": 2,
+        "learning_rate": "1e-4",
+        "lora_r": 32,
+        "lora_alpha": 64,
+        "target_modules": "q_proj,v_proj",
+        "finetune_mode": "LoRA (Parameter-Efficient PEFT) - Recommended",
+        "precision": "FP16 Mixed Precision",
+        "optim": "adamw_torch",
+        "description": "⚡ **Whisper Large-v3-Turbo** (809M params, 4 decoder layers): High accuracy with fast decoding. Recommended batch size 8 with LoRA for 16GB-24GB VRAM."
+    },
+    "openai/whisper-large-v3": {
+        "batch_size": 4,
+        "eval_batch_size": 4,
+        "grad_accum": 4,
+        "learning_rate": "5e-5",
+        "lora_r": 32,
+        "lora_alpha": 64,
+        "target_modules": "q_proj,v_proj",
+        "finetune_mode": "LoRA (Parameter-Efficient PEFT) - Recommended",
+        "precision": "FP16 Mixed Precision",
+        "optim": "adamw_torch",
+        "description": "🏆 **Whisper Large-v3** (1550M params, 32 decoder layers): Maximum model capacity. Requires smaller batch size (4) and grad accumulation (4) to prevent CUDA out-of-memory."
+    },
+    "openai/whisper-medium": {
+        "batch_size": 4,
+        "eval_batch_size": 4,
+        "grad_accum": 4,
+        "learning_rate": "1e-4",
+        "lora_r": 32,
+        "lora_alpha": 64,
+        "target_modules": "q_proj,v_proj",
+        "finetune_mode": "LoRA (Parameter-Efficient PEFT) - Recommended",
+        "precision": "FP16 Mixed Precision",
+        "optim": "adamw_torch",
+        "description": "⚖️ **Whisper Medium** (769M params, 24 decoder layers): Strong bilingual capabilities with moderate VRAM requirements."
+    },
+    "openai/whisper-small": {
+        "batch_size": 8,
+        "eval_batch_size": 8,
+        "grad_accum": 2,
+        "learning_rate": "1e-4",
+        "lora_r": 16,
+        "lora_alpha": 32,
+        "target_modules": "q_proj,v_proj",
+        "finetune_mode": "LoRA (Parameter-Efficient PEFT) - Recommended",
+        "precision": "FP16 Mixed Precision",
+        "optim": "adamw_torch",
+        "description": "📦 **Whisper Small** (244M params): Light memory footprint, comfortably fine-tunes on 8GB-12GB consumer GPUs."
+    },
+    "openai/whisper-base": {
+        "batch_size": 16,
+        "eval_batch_size": 16,
+        "grad_accum": 1,
+        "learning_rate": "1e-4",
+        "lora_r": 16,
+        "lora_alpha": 32,
+        "target_modules": "q_proj,v_proj",
+        "finetune_mode": "Full Model Fine-Tuning",
+        "precision": "FP32 (Standard)",
+        "optim": "adamw_torch",
+        "description": "🚀 **Whisper Base** (74M params): Highly responsive. Can be full-finetuned directly on consumer GPUs or CPUs."
+    },
+    "openai/whisper-tiny": {
+        "batch_size": 16,
+        "eval_batch_size": 16,
+        "grad_accum": 1,
+        "learning_rate": "1e-4",
+        "lora_r": 8,
+        "lora_alpha": 16,
+        "target_modules": "q_proj,v_proj",
+        "finetune_mode": "Full Model Fine-Tuning",
+        "precision": "FP32 (Standard)",
+        "optim": "adamw_torch",
+        "description": "🌱 **Whisper Tiny** (39M params): Ultra-lightweight. Perfect for fast pipeline debugging and testing mini-batches on CPU."
+    }
+}
 
 def get_system_device_info():
     """Detects available hardware acceleration (CPU or CUDA)."""
@@ -111,10 +194,6 @@ def create_temp_export(content: str, suffix: str) -> str:
 # Tab 1: Streaming Single Audio & Microphone Handler with Stop Support
 # ==============================================================================
 def transcribe_audio_streaming(audio_path, model_name, language_choice, beam_size, temperature, initial_prompt, vad_filter):
-    """
-    Generator yielding real-time transcription updates chunk-by-chunk.
-    Allows instant cancellation via Gradio's cancels parameter.
-    """
     if not audio_path:
         yield (
             "Please record speech using your microphone or upload an audio file (.wav, .mp3, .flac).",
@@ -562,10 +641,7 @@ def on_eval_stop():
 # Tab 4: Batched Audio Training / Fine-Tuning Manager
 # ==============================================================================
 def check_training_environment():
-    """Checks GPU hardware and training package availability."""
     checks = []
-
-    # 1. Compute check
     try:
         import torch
         if torch.cuda.is_available():
@@ -577,7 +653,6 @@ def check_training_environment():
     except Exception as e:
         checks.append(f"🔴 **Compute Hardware**: {e}")
 
-    # 2. Package dependencies check
     missing = []
     for pkg in ["transformers", "datasets", "peft", "accelerate", "evaluate"]:
         try:
@@ -593,7 +668,6 @@ def check_training_environment():
     return "\n\n".join(checks)
 
 def validate_training_dataset_gui(train_csv, train_audio, val_csv, val_audio):
-    """Validates training and validation dataset files, counting audio files."""
     report = []
     for name, csv_path, audio_dir in [("Train Dataset", train_csv, train_audio), ("Validation Dataset", val_csv, val_audio)]:
         p_csv = Path(csv_path)
@@ -624,71 +698,175 @@ def validate_training_dataset_gui(train_csv, train_audio, val_csv, val_audio):
 
     return "\n\n".join(report)
 
-def build_cli_command(model_name, train_csv, train_audio, val_csv, val_audio, output_dir, language, batch_size, grad_accum, epochs, lr, use_lora, use_fp16):
-    """Builds the exact shell command to reproduce this training run."""
+def apply_model_preset(model_name):
+    """Adapts all training hyperparameters to optimal defaults when base model changes."""
+    preset = MODEL_PRESETS.get(model_name, {
+        "batch_size": 8,
+        "eval_batch_size": 8,
+        "grad_accum": 2,
+        "learning_rate": "1e-4",
+        "lora_r": 32,
+        "lora_alpha": 64,
+        "target_modules": "q_proj,v_proj",
+        "finetune_mode": "LoRA (Parameter-Efficient PEFT) - Recommended",
+        "precision": "FP16 Mixed Precision",
+        "optim": "adamw_torch",
+        "description": f"Custom model `{model_name}`."
+    })
+
+    eff_text = f"💡 **Effective Batch Size**: `{preset['batch_size']} × {preset['grad_accum']} = {preset['batch_size'] * preset['grad_accum']} samples per step`"
+
+    return (
+        preset["batch_size"],
+        preset["eval_batch_size"],
+        preset["grad_accum"],
+        preset["learning_rate"],
+        preset["lora_r"],
+        preset["lora_alpha"],
+        preset["target_modules"],
+        preset["finetune_mode"],
+        preset["precision"],
+        preset["optim"],
+        preset["description"],
+        eff_text
+    )
+
+def build_cli_command(
+    model_name, language, task,
+    train_csv, train_audio, val_csv, val_audio, output_dir, num_proc,
+    finetune_mode, lora_r, lora_alpha, lora_dropout, lora_target_modules,
+    batch_size, eval_batch_size, grad_accum, grad_ckpt, precision, dataloader_workers,
+    optim, learning_rate, lr_scheduler, warmup_steps, weight_decay, max_grad_norm,
+    epochs, max_steps, eval_steps, save_steps, logging_steps, save_limit, best_metric, report_to,
+    gen_max_len, gen_beams
+):
     cmd = [
         "python3 scripts/train_whisper.py",
         f"--model_name_or_path \"{model_name}\"",
+        f"--language \"{language}\"",
+        f"--task \"{task}\"",
         f"--train_csv \"{train_csv}\"",
         f"--train_audio \"{train_audio}\"",
         f"--val_csv \"{val_csv}\"",
         f"--val_audio \"{val_audio}\"",
         f"--output_dir \"{output_dir}\"",
-        f"--language \"{language}\"",
+        f"--num_proc {int(num_proc)}",
         f"--batch_size {int(batch_size)}",
+        f"--eval_batch_size {int(eval_batch_size)}",
         f"--gradient_accumulation_steps {int(grad_accum)}",
+        f"--learning_rate {learning_rate}",
+        f"--optim \"{optim}\"",
+        f"--lr_scheduler_type \"{lr_scheduler}\"",
+        f"--warmup_steps {int(warmup_steps)}",
+        f"--weight_decay {float(weight_decay)}",
+        f"--max_grad_norm {float(max_grad_norm)}",
         f"--num_epochs {int(epochs)}",
-        f"--learning_rate {lr}"
+        f"--max_steps {int(max_steps)}",
+        f"--eval_steps {int(eval_steps)}",
+        f"--save_steps {int(save_steps)}",
+        f"--logging_steps {int(logging_steps)}",
+        f"--save_total_limit {int(save_limit)}",
+        f"--metric_for_best_model \"{best_metric}\"",
+        f"--report_to \"{report_to}\"",
+        f"--generation_max_length {int(gen_max_len)}",
+        f"--generation_num_beams {int(gen_beams)}",
+        f"--dataloader_num_workers {int(dataloader_workers)}"
     ]
-    if use_lora:
+
+    if grad_ckpt:
+        cmd.append("--gradient_checkpointing")
+    if "LoRA" in finetune_mode:
         cmd.append("--use_lora")
-    if use_fp16:
+        cmd.append(f"--lora_r {int(lora_r)}")
+        cmd.append(f"--lora_alpha {int(lora_alpha)}")
+        cmd.append(f"--lora_dropout {float(lora_dropout)}")
+        cmd.append(f"--lora_target_modules \"{lora_target_modules}\"")
+    elif "QLoRA" in finetune_mode:
+        cmd.append("--use_qlora")
+        cmd.append(f"--lora_r {int(lora_r)}")
+        cmd.append(f"--lora_alpha {int(lora_alpha)}")
+        cmd.append(f"--lora_dropout {float(lora_dropout)}")
+        cmd.append(f"--lora_target_modules \"{lora_target_modules}\"")
+
+    if precision == "FP16 Mixed Precision":
         cmd.append("--fp16")
+    elif precision == "BF16 (Ampere/Ada)":
+        cmd.append("--bf16")
+
     return " \\\n    ".join(cmd)
 
-def start_training_gui(model_name, train_csv, train_audio, val_csv, val_audio, output_dir, language, batch_size, grad_accum, epochs, lr, finetune_mode, use_fp16):
-    """
-    Spawns scripts/train_whisper.py as a live subprocess and streams logs into the GUI.
-    """
+def start_training_gui(
+    model_name, language, task,
+    train_csv, train_audio, val_csv, val_audio, output_dir, num_proc,
+    finetune_mode, lora_r, lora_alpha, lora_dropout, lora_target_modules,
+    batch_size, eval_batch_size, grad_accum, grad_ckpt, precision, dataloader_workers,
+    optim, learning_rate, lr_scheduler, warmup_steps, weight_decay, max_grad_norm,
+    epochs, max_steps, eval_steps, save_steps, logging_steps, save_limit, best_metric, report_to,
+    gen_max_len, gen_beams
+):
     global ACTIVE_TRAIN_PROC
 
-    # Check for active job
     if ACTIVE_TRAIN_PROC and ACTIVE_TRAIN_PROC.poll() is None:
-        yield "⚠️ A training run is already in progress. Please stop it first.", "<div style='color: #ea580c;'>Training already active.</div>"
+        yield "⚠️ A training run is already in progress. Please abort it first.", "<div style='color: #ea580c;'>Training already active.</div>"
         return
 
-    # Check dependencies
     missing = [pkg for pkg in ["transformers", "datasets", "peft", "accelerate"] if not _is_pkg_installed(pkg)]
     if missing:
-        error_txt = f"❌ Missing required packages for training: {', '.join(missing)}\nPlease run: pip install -r requirements_gpu.txt\n"
+        error_txt = f"❌ Missing required packages for training: {', '.join(missing)}\nPlease install training requirements:\n  pip install -r requirements_gpu.txt\n"
         yield error_txt, f"<div style='color: #dc2626; font-weight: 600;'>{error_txt}</div>"
         return
 
-    # Ensure dataset exists
     if not Path(train_csv).is_file():
         yield f"❌ Train CSV '{train_csv}' does not exist.", "<div style='color: #dc2626;'>Train CSV missing</div>"
         return
 
-    use_lora = "LoRA" in finetune_mode
     cmd = [
         sys.executable,
         str(SCRIPT_DIR / "scripts" / "train_whisper.py"),
         "--model_name_or_path", model_name,
+        "--language", language,
+        "--task", task,
         "--train_csv", train_csv,
         "--train_audio", train_audio,
         "--val_csv", val_csv,
         "--val_audio", val_audio,
         "--output_dir", output_dir,
-        "--language", language,
+        "--num_proc", str(int(num_proc)),
         "--batch_size", str(int(batch_size)),
+        "--eval_batch_size", str(int(eval_batch_size)),
         "--gradient_accumulation_steps", str(int(grad_accum)),
+        "--learning_rate", str(learning_rate),
+        "--optim", optim,
+        "--lr_scheduler_type", lr_scheduler,
+        "--warmup_steps", str(int(warmup_steps)),
+        "--weight_decay", str(float(weight_decay)),
+        "--max_grad_norm", str(float(max_grad_norm)),
         "--num_epochs", str(int(epochs)),
-        "--learning_rate", str(lr)
+        "--max_steps", str(int(max_steps)),
+        "--eval_steps", str(int(eval_steps)),
+        "--save_steps", str(int(save_steps)),
+        "--logging_steps", str(int(logging_steps)),
+        "--save_total_limit", str(int(save_limit)),
+        "--metric_for_best_model", best_metric,
+        "--report_to", report_to,
+        "--generation_max_length", str(int(gen_max_len)),
+        "--generation_num_beams", str(int(gen_beams)),
+        "--dataloader_num_workers", str(int(dataloader_workers))
     ]
-    if use_lora:
+
+    if grad_ckpt:
+        cmd.append("--gradient_checkpointing")
+    if "LoRA" in finetune_mode:
         cmd.append("--use_lora")
-    if use_fp16:
+        cmd.extend(["--lora_r", str(int(lora_r)), "--lora_alpha", str(int(lora_alpha)), "--lora_dropout", str(float(lora_dropout)), "--lora_target_modules", str(lora_target_modules)])
+    elif "QLoRA" in finetune_mode:
+        cmd.append("--use_qlora")
+        cmd.extend(["--lora_r", str(int(lora_r)), "--lora_alpha", str(int(lora_alpha)), "--lora_dropout", str(float(lora_dropout)), "--lora_target_modules", str(lora_target_modules)])
+
+    if precision == "FP16 Mixed Precision":
         cmd.append("--fp16")
+    elif precision == "BF16 (Ampere/Ada)":
+        cmd.append("--bf16")
 
     effective_batch = int(batch_size) * int(grad_accum)
     log_lines = [
@@ -696,14 +874,16 @@ def start_training_gui(model_name, train_csv, train_audio, val_csv, val_audio, o
         f"🚀 INITIATING WHISPER BATCHED FINE-TUNING",
         "=" * 70,
         f"• Base Model          : {model_name}",
-        f"• Language Mode       : {language}",
-        f"• Per-Device Batch    : {int(batch_size)}",
+        f"• Target Language     : {language} (task: {task})",
+        f"• Per-Device Batch    : {int(batch_size)} (Eval: {int(eval_batch_size)})",
         f"• Gradient Accum Steps: {int(grad_accum)}",
         f"• Effective Batch Size: {effective_batch}",
-        f"• Total Epochs        : {int(epochs)}",
-        f"• Learning Rate       : {lr}",
-        f"• Fine-Tuning Method  : {'LoRA (PEFT Adapter)' if use_lora else 'Full Model Fine-Tuning'}",
-        f"• Output Checkpoint   : {output_dir}",
+        f"• Optimizer           : {optim} (lr: {learning_rate}, scheduler: {lr_scheduler})",
+        f"• Total Epochs        : {int(epochs)} (max_steps: {int(max_steps)})",
+        f"• Fine-Tuning Method  : {finetune_mode}",
+        f"• Precision           : {precision}",
+        f"• Checkpoint Saving   : every {int(save_steps)} steps (eval every {int(eval_steps)} steps)",
+        f"• Output Directory    : {output_dir}",
         "=" * 70,
         "Launching training process...\n"
     ]
@@ -727,8 +907,8 @@ def start_training_gui(model_name, train_csv, train_audio, val_csv, val_audio, o
 
         for line in iter(ACTIVE_TRAIN_PROC.stdout.readline, ""):
             log_lines.append(line.rstrip())
-            if len(log_lines) > 300:
-                log_lines = log_lines[-300:]
+            if len(log_lines) > 400:
+                log_lines = log_lines[-400:]
             yield "\n".join(log_lines), status_html
 
         ACTIVE_TRAIN_PROC.stdout.close()
@@ -751,7 +931,6 @@ def start_training_gui(model_name, train_csv, train_audio, val_csv, val_audio, o
         yield "\n".join(log_lines), f"<div style='color: #dc2626;'>{err_str}</div>"
 
 def stop_training_gui():
-    """Aborts the active training subprocess."""
     global ACTIVE_TRAIN_PROC
     if ACTIVE_TRAIN_PROC and ACTIVE_TRAIN_PROC.poll() is None:
         try:
@@ -872,7 +1051,7 @@ with gr.Blocks(title="Bangla & English ASR - Whisper") as demo:
                     🇧🇩 বাংলা & 🇬🇧 English
                 </span>
                 <span style="background: rgba(255,255,255,0.18); padding: 5px 12px; border-radius: 20px; font-size: 0.8rem; font-weight: 600; backdrop-filter: blur(4px);">
-                    ⚡ INT8 Inference & LoRA Training
+                    ⚡ INT8 Inference & Full Parameter Training
                 </span>
                 <span style="background: rgba(255,255,255,0.18); padding: 5px 12px; border-radius: 20px; font-size: 0.8rem; font-weight: 600; backdrop-filter: blur(4px);">
                     🚀 large-v3-turbo
@@ -1184,13 +1363,13 @@ with gr.Blocks(title="Bangla & English ASR - Whisper") as demo:
             )
 
         # ======================================================================
-        # TAB 4: Batched Audio Training / Fine-Tuning GUI
+        # TAB 4: Batched Audio Training / Fine-Tuning Manager (Full Params)
         # ======================================================================
         with gr.TabItem("🏋️ Train / Fine-Tune (Batched)"):
             gr.Markdown("""
-            ### 🏋️ Whisper Batched Audio Training & Fine-Tuning
-            Fine-tune Whisper models on customized Bengali and English speech datasets directly from this interface.
-            Supports **LoRA (Parameter-Efficient PEFT)** for fast training with modest VRAM, or **Full Fine-Tuning**.
+            ### 🏋️ Whisper Batched Audio Training & Fine-Tuning Studio
+            Fine-tune Whisper models on customized Bengali and English speech datasets with **complete parameter control**.
+            Changing the base model automatically adapts optimal batching, learning rate, and architecture presets.
             """)
 
             with gr.Accordion("🔍 Hardware Readiness & Dependencies Check", open=False):
@@ -1199,26 +1378,50 @@ with gr.Blocks(title="Bangla & English ASR - Whisper") as demo:
                 check_env_btn.click(fn=check_training_environment, outputs=[train_env_markdown])
 
             with gr.Row():
-                # Left Column: Dataset & Hyperparameters
+                # Left Column: Complete Parameter Controls
                 with gr.Column(scale=1):
-                    with gr.Accordion("📁 1. Dataset Paths", open=True):
-                        train_csv_box = gr.Textbox(
-                            value="data/train/metadata.csv",
-                            label="Train Metadata CSV Path"
+                    # Section 1: Model & Architecture Selection
+                    with gr.Accordion("🤖 1. Base Model & Architecture (Auto-Adaptive)", open=True):
+                        base_model_dropdown = gr.Dropdown(
+                            choices=[
+                                "openai/whisper-large-v3-turbo",
+                                "openai/whisper-large-v3",
+                                "openai/whisper-medium",
+                                "openai/whisper-small",
+                                "openai/whisper-base",
+                                "openai/whisper-tiny"
+                            ],
+                            value="openai/whisper-large-v3-turbo",
+                            label="Whisper Base Checkpoint (select to auto-adapt parameters)"
                         )
-                        train_audio_box = gr.Textbox(
-                            value="data/train/audio",
-                            label="Train Audio Directory"
-                        )
-                        val_csv_box = gr.Textbox(
-                            value="data/val/metadata.csv",
-                            label="Validation Metadata CSV Path"
-                        )
-                        val_audio_box = gr.Textbox(
-                            value="data/val/audio",
-                            label="Validation Audio Directory"
-                        )
-                        verify_data_btn = gr.Button("🔍 Verify Dataset Paths & Counts", size="sm", variant="secondary")
+                        model_desc_markdown = gr.Markdown(value=MODEL_PRESETS["openai/whisper-large-v3-turbo"]["description"])
+
+                        with gr.Row():
+                            target_lang_dropdown = gr.Dropdown(
+                                choices=["bengali", "english"],
+                                value="bengali",
+                                label="Target Language"
+                            )
+                            task_dropdown = gr.Dropdown(
+                                choices=["transcribe", "translate"],
+                                value="transcribe",
+                                label="Task"
+                            )
+
+                    # Section 2: Datasets & Preprocessing
+                    with gr.Accordion("📁 2. Dataset Paths & Audio Filtering", open=True):
+                        with gr.Row():
+                            train_csv_box = gr.Textbox(value="data/train/metadata.csv", label="Train Metadata CSV Path")
+                            train_audio_box = gr.Textbox(value="data/train/audio", label="Train Audio Directory")
+                        with gr.Row():
+                            val_csv_box = gr.Textbox(value="data/val/metadata.csv", label="Validation Metadata CSV Path")
+                            val_audio_box = gr.Textbox(value="data/val/audio", label="Validation Audio Directory")
+
+                        with gr.Row():
+                            num_proc_slider = gr.Slider(minimum=1, maximum=8, value=2, step=1, label="CPU Worker Processes (num_proc)")
+                            dataloader_workers_slider = gr.Slider(minimum=0, maximum=8, value=2, step=1, label="DataLoader Workers")
+
+                        verify_data_btn = gr.Button("🔍 Verify Dataset Files & Audio Integrity", size="sm", variant="secondary")
                         data_verify_output = gr.Markdown()
                         verify_data_btn.click(
                             fn=validate_training_dataset_gui,
@@ -1226,104 +1429,157 @@ with gr.Blocks(title="Bangla & English ASR - Whisper") as demo:
                             outputs=[data_verify_output]
                         )
 
-                    with gr.Accordion("⚙️ 2. Model & Batching Hyperparameters", open=True):
-                        base_model_dropdown = gr.Dropdown(
-                            choices=[
-                                "openai/whisper-large-v3-turbo",
-                                "openai/whisper-large-v3",
-                                "openai/whisper-small",
-                                "openai/whisper-base",
-                                "openai/whisper-tiny"
-                            ],
-                            value="openai/whisper-large-v3-turbo",
-                            label="Base Model Checkpoint"
-                        )
-                        target_lang_dropdown = gr.Dropdown(
-                            choices=["bengali", "english"],
-                            value="bengali",
-                            label="Target Language"
-                        )
-
+                    # Section 3: Batching & Memory Optimization
+                    with gr.Accordion("⚡ 3. Batching & Memory Optimization", open=True):
                         with gr.Row():
-                            train_batch_slider = gr.Slider(
-                                minimum=1,
-                                maximum=32,
-                                value=8,
-                                step=1,
-                                label="Per-Device Batch Size"
-                            )
-                            grad_accum_slider = gr.Slider(
-                                minimum=1,
-                                maximum=16,
-                                value=2,
-                                step=1,
-                                label="Gradient Accumulation Steps"
-                            )
+                            train_batch_slider = gr.Slider(minimum=1, maximum=64, value=8, step=1, label="Per-Device Train Batch Size")
+                            eval_batch_slider = gr.Slider(minimum=1, maximum=64, value=8, step=1, label="Per-Device Eval Batch Size")
+                            grad_accum_slider = gr.Slider(minimum=1, maximum=32, value=2, step=1, label="Gradient Accumulation Steps")
 
-                        batch_info_display = gr.Markdown("💡 **Effective Batch Size**: `8 × 2 = 16 samples per optimization step`")
+                        batch_info_display = gr.Markdown("💡 **Effective Batch Size**: `8 × 2 = 16 samples per step`")
 
                         def update_effective_batch(b, g):
-                            return f"💡 **Effective Batch Size**: `{int(b)} × {int(g)} = {int(b) * int(g)} samples per optimization step`"
+                            return f"💡 **Effective Batch Size**: `{int(b)} × {int(g)} = {int(b) * int(g)} samples per step`"
 
                         train_batch_slider.change(fn=update_effective_batch, inputs=[train_batch_slider, grad_accum_slider], outputs=[batch_info_display])
                         grad_accum_slider.change(fn=update_effective_batch, inputs=[train_batch_slider, grad_accum_slider], outputs=[batch_info_display])
 
                         with gr.Row():
-                            epochs_slider = gr.Slider(
-                                minimum=1,
-                                maximum=30,
-                                value=5,
-                                step=1,
-                                label="Total Epochs"
+                            precision_radio = gr.Radio(
+                                choices=["FP16 Mixed Precision", "BF16 (Ampere/Ada)", "FP32 (Standard)"],
+                                value="FP16 Mixed Precision",
+                                label="Compute Precision"
                             )
-                            lr_dropdown = gr.Dropdown(
-                                choices=["1e-5", "5e-5", "1e-4", "2e-4"],
-                                value="1e-4",
-                                label="Learning Rate"
-                            )
+                            grad_ckpt_check = gr.Checkbox(value=True, label="Enable Gradient Checkpointing (Saves VRAM)")
 
+                    # Section 4: Parameter-Efficient Fine-Tuning (PEFT / LoRA / QLoRA)
+                    with gr.Accordion("🧩 4. LoRA / QLoRA & Quantization Parameters", open=True):
                         finetune_mode_radio = gr.Radio(
-                            choices=["LoRA (Parameter-Efficient PEFT) - Recommended", "Full Model Fine-Tuning"],
+                            choices=[
+                                "LoRA (Parameter-Efficient PEFT) - Recommended",
+                                "QLoRA (4-Bit NF4 Quantization)",
+                                "Full Model Fine-Tuning"
+                            ],
                             value="LoRA (Parameter-Efficient PEFT) - Recommended",
-                            label="Fine-Tuning Architecture"
+                            label="Fine-Tuning Architecture Mode"
                         )
 
                         with gr.Row():
-                            fp16_check = gr.Checkbox(
-                                value=True,
-                                label="FP16 Mixed Precision (recommended on GPU)"
+                            lora_r_slider = gr.Slider(minimum=4, maximum=128, value=32, step=4, label="LoRA Rank (r)")
+                            lora_alpha_slider = gr.Slider(minimum=8, maximum=256, value=64, step=8, label="LoRA Alpha (scaling)")
+                            lora_dropout_slider = gr.Slider(minimum=0.0, maximum=0.2, value=0.05, step=0.01, label="LoRA Dropout")
+
+                        lora_target_box = gr.Textbox(
+                            value="q_proj,v_proj",
+                            label="LoRA Target Attention Modules (comma-separated)",
+                            placeholder="q_proj,v_proj or q_proj,k_proj,v_proj,out_proj,fc1,fc2"
+                        )
+
+                    # Section 5: Optimizer & Learning Rate Schedule
+                    with gr.Accordion("🎯 5. Optimizer, Learning Rate & Scheduler", open=False):
+                        with gr.Row():
+                            optim_dropdown = gr.Dropdown(
+                                choices=["adamw_torch", "adamw_bnb_8bit", "adafactor", "sgd"],
+                                value="adamw_torch",
+                                label="Optimizer"
                             )
-                            output_dir_box = gr.Textbox(
-                                value="./checkpoints/whisper_bangla_lora",
-                                label="Checkpoint Save Directory"
+                            lr_input = gr.Dropdown(
+                                choices=["1e-5", "3e-5", "5e-5", "1e-4", "2e-4", "5e-4"],
+                                value="1e-4",
+                                label="Learning Rate"
                             )
+                            scheduler_dropdown = gr.Dropdown(
+                                choices=["linear", "cosine", "cosine_with_restarts", "polynomial", "constant_with_warmup"],
+                                value="linear",
+                                label="LR Scheduler Type"
+                            )
+
+                        with gr.Row():
+                            warmup_slider = gr.Slider(minimum=0, maximum=500, value=50, step=10, label="Warmup Steps")
+                            weight_decay_slider = gr.Slider(minimum=0.0, maximum=0.2, value=0.01, step=0.005, label="Weight Decay")
+                            max_grad_norm_slider = gr.Slider(minimum=0.1, maximum=5.0, value=1.0, step=0.1, label="Max Gradient Norm (Clipping)")
+
+                    # Section 6: Training Duration & Checkpointing Schedule
+                    with gr.Accordion("⏱️ 6. Training Duration, Steps & Checkpointing", open=False):
+                        with gr.Row():
+                            epochs_slider = gr.Slider(minimum=1, maximum=30, value=5, step=1, label="Total Epochs")
+                            max_steps_box = gr.Number(value=-1, label="Max Steps (-1 for full epochs, >0 overrides epochs)")
+
+                        with gr.Row():
+                            eval_steps_box = gr.Number(value=200, label="Evaluation Frequency (steps)")
+                            save_steps_box = gr.Number(value=200, label="Checkpoint Save Frequency (steps)")
+                            logging_steps_box = gr.Number(value=25, label="Logging Steps")
+                            save_limit_box = gr.Number(value=2, label="Max Checkpoints to Keep")
+
+                        with gr.Row():
+                            best_metric_dropdown = gr.Dropdown(choices=["wer", "cer", "loss"], value="wer", label="Metric for Best Model Selection")
+                            report_to_dropdown = gr.Dropdown(choices=["tensorboard", "none", "wandb"], value="tensorboard", label="Dashboard Logger")
+
+                        output_dir_box = gr.Textbox(value="./checkpoints/whisper_bangla_lora", label="Output Checkpoint Save Directory")
+
+                    # Section 7: Evaluation Generation & Decoding
+                    with gr.Accordion("🎙️ 7. Evaluation Generation & Decoding Parameters", open=False):
+                        with gr.Row():
+                            gen_len_slider = gr.Slider(minimum=64, maximum=448, value=225, step=1, label="Generation Max Length (tokens)")
+                            gen_beams_slider = gr.Slider(minimum=1, maximum=5, value=1, step=1, label="Generation Num Beams (1 for fast eval)")
+
+                    # Auto-adaptation of hyperparameters on model change
+                    base_model_dropdown.change(
+                        fn=apply_model_preset,
+                        inputs=[base_model_dropdown],
+                        outputs=[
+                            train_batch_slider,
+                            eval_batch_slider,
+                            grad_accum_slider,
+                            lr_input,
+                            lora_r_slider,
+                            lora_alpha_slider,
+                            lora_target_box,
+                            finetune_mode_radio,
+                            precision_radio,
+                            optim_dropdown,
+                            model_desc_markdown,
+                            batch_info_display
+                        ]
+                    )
 
                     with gr.Row():
                         train_btn = gr.Button("🚀 Launch Batched Training", variant="primary", size="lg", scale=2)
                         train_stop_btn = gr.Button("🛑 Abort Training", variant="stop", size="lg", scale=1)
 
-                    with gr.Accordion("📋 View Equivalent CLI Shell Command", open=False):
-                        cli_code_output = gr.Code(language="shell", label="Command for Remote Servers")
+                    with gr.Accordion("📋 View Complete Equivalent CLI Command", open=False):
+                        cli_code_output = gr.Code(language="shell", label="Command for Remote Servers / Cloud Clusters")
                         show_cmd_btn = gr.Button("Generate Command", size="sm", variant="secondary")
-                        show_cmd_btn.click(
-                            fn=build_cli_command,
-                            inputs=[base_model_dropdown, train_csv_box, train_audio_box, val_csv_box, val_audio_box, output_dir_box, target_lang_dropdown, train_batch_slider, grad_accum_slider, epochs_slider, lr_dropdown, finetune_mode_radio, fp16_check],
-                            outputs=[cli_code_output]
-                        )
 
                 # Right Column: Live Terminal & Training Console
                 with gr.Column(scale=1):
-                    train_status_banner = gr.HTML(value="<div style='color: #64748b; font-size: 0.95rem;'>Ready to train. Configure datasets and press <b>Launch Batched Training</b>.</div>")
+                    train_status_banner = gr.HTML(value="<div style='color: #64748b; font-size: 0.95rem;'>Ready to train. Configure parameters and press <b>Launch Batched Training</b>.</div>")
                     train_log_box = gr.Textbox(
                         label="🖥️ Live Training Console & Loss Output",
-                        lines=22,
+                        lines=28,
                         placeholder="Training output, step loss, evaluation WER/CER, and checkpoint notifications will stream here live...",
                         elem_classes=["console-log"]
                     )
 
+            all_train_inputs = [
+                base_model_dropdown, target_lang_dropdown, task_dropdown,
+                train_csv_box, train_audio_box, val_csv_box, val_audio_box, output_dir_box, num_proc_slider,
+                finetune_mode_radio, lora_r_slider, lora_alpha_slider, lora_dropout_slider, lora_target_box,
+                train_batch_slider, eval_batch_slider, grad_accum_slider, grad_ckpt_check, precision_radio, dataloader_workers_slider,
+                optim_dropdown, lr_input, scheduler_dropdown, warmup_slider, weight_decay_slider, max_grad_norm_slider,
+                epochs_slider, max_steps_box, eval_steps_box, save_steps_box, logging_steps_box, save_limit_box, best_metric_dropdown, report_to_dropdown,
+                gen_len_slider, gen_beams_slider
+            ]
+
+            show_cmd_btn.click(
+                fn=build_cli_command,
+                inputs=all_train_inputs,
+                outputs=[cli_code_output]
+            )
+
             train_btn.click(
                 fn=start_training_gui,
-                inputs=[base_model_dropdown, train_csv_box, train_audio_box, val_csv_box, val_audio_box, output_dir_box, target_lang_dropdown, train_batch_slider, grad_accum_slider, epochs_slider, lr_dropdown, finetune_mode_radio, fp16_check],
+                inputs=all_train_inputs,
                 outputs=[train_log_box, train_status_banner]
             )
 

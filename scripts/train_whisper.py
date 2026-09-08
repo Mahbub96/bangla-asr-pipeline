@@ -70,43 +70,98 @@ def main():
         pass
 
     parser = argparse.ArgumentParser(description="Fine-tune Whisper on Bangla/English speech data.")
+    # Model & Tokenizer
     parser.add_argument("--model_name_or_path", default="openai/whisper-large-v3-turbo", help="Base model checkpoint.")
+    parser.add_argument("--language", default="bengali", help="Language name for Whisper tokenizer ('bengali' or 'english').")
+    parser.add_argument("--task", default="transcribe", choices=["transcribe", "translate"], help="Task ('transcribe' or 'translate').")
+    
+    # Datasets
     parser.add_argument("--train_csv", default="data/train/metadata.csv", help="Training metadata CSV.")
     parser.add_argument("--train_audio", default="data/train/audio", help="Training audio folder.")
     parser.add_argument("--val_csv", default="data/val/metadata.csv", help="Validation metadata CSV.")
     parser.add_argument("--val_audio", default="data/val/audio", help="Validation audio folder.")
     parser.add_argument("--output_dir", default="./checkpoints/whisper_bangla_lora", help="Directory to save fine-tuned checkpoints.")
-    parser.add_argument("--language", default="bengali", help="Language name for Whisper tokenizer ('bengali' or 'english').")
-    parser.add_argument("--use_lora", action="store_true", help="Enable LoRA parameter-efficient fine-tuning (recommended for single GPU).")
+    parser.add_argument("--num_proc", type=int, default=2, help="Number of processes for feature extraction.")
+
+    # LoRA / QLoRA
+    parser.add_argument("--use_lora", action="store_true", help="Enable LoRA parameter-efficient fine-tuning.")
+    parser.add_argument("--use_qlora", action="store_true", help="Enable 4-bit QLoRA with BitsAndBytes.")
+    parser.add_argument("--lora_r", type=int, default=32, help="LoRA attention dimension rank.")
+    parser.add_argument("--lora_alpha", type=int, default=64, help="LoRA alpha scaling factor.")
+    parser.add_argument("--lora_dropout", type=float, default=0.05, help="LoRA dropout probability.")
+    parser.add_argument("--lora_target_modules", default="q_proj,v_proj", help="Comma-separated target module names.")
+
+    # Batching & Compute
     parser.add_argument("--batch_size", type=int, default=8, help="Per-device train batch size.")
+    parser.add_argument("--eval_batch_size", type=int, default=None, help="Per-device eval batch size.")
     parser.add_argument("--gradient_accumulation_steps", type=int, default=2, help="Gradient accumulation steps.")
+    parser.add_argument("--gradient_checkpointing", action="store_true", default=True, help="Use gradient checkpointing.")
+    parser.add_argument("--fp16", action="store_true", default=torch.cuda.is_available(), help="Use FP16 mixed precision on GPU.")
+    parser.add_argument("--bf16", action="store_true", default=False, help="Use BF16 mixed precision on Ampere/Ada GPU.")
+    parser.add_argument("--dataloader_num_workers", type=int, default=2, help="DataLoader workers count.")
+
+    # Optimizer & Scheduler
+    parser.add_argument("--optim", default="adamw_torch", help="Optimizer ('adamw_torch', 'adamw_bnb_8bit', 'adafactor').")
     parser.add_argument("--learning_rate", type=float, default=1e-4, help="Learning rate.")
+    parser.add_argument("--lr_scheduler_type", default="linear", help="LR scheduler type.")
+    parser.add_argument("--warmup_steps", type=int, default=50, help="Linear warmup steps.")
+    parser.add_argument("--weight_decay", type=float, default=0.01, help="Weight decay.")
+    parser.add_argument("--max_grad_norm", type=float, default=1.0, help="Max gradient clipping norm.")
+
+    # Duration & Checkpointing
     parser.add_argument("--num_epochs", type=int, default=5, help="Total training epochs.")
+    parser.add_argument("--max_steps", type=int, default=-1, help="If > 0, overrides num_epochs.")
     parser.add_argument("--eval_steps", type=int, default=200, help="Evaluation frequency in steps.")
     parser.add_argument("--save_steps", type=int, default=200, help="Checkpoint save frequency in steps.")
     parser.add_argument("--logging_steps", type=int, default=25, help="Logging frequency in steps.")
-    parser.add_argument("--fp16", action="store_true", default=torch.cuda.is_available(), help="Use FP16 mixed precision on GPU.")
+    parser.add_argument("--save_total_limit", type=int, default=2, help="Max number of checkpoints to retain.")
+    parser.add_argument("--metric_for_best_model", default="wer", help="Metric for selecting best model ('wer', 'cer', 'loss').")
+    parser.add_argument("--report_to", default="tensorboard", help="Dashboard logger ('tensorboard', 'none', 'wandb').")
+
+    # Decoding during Evaluation
+    parser.add_argument("--generation_max_length", type=int, default=225, help="Max token length for generation during eval.")
+    parser.add_argument("--generation_num_beams", type=int, default=1, help="Beam count during evaluation generation.")
 
     args = parser.parse_args()
+    eval_bs = args.eval_batch_size if args.eval_batch_size is not None else args.batch_size
 
     print(f"Loading processor and model: {args.model_name_or_path}...")
     feature_extractor = WhisperFeatureExtractor.from_pretrained(args.model_name_or_path)
-    tokenizer = WhisperTokenizer.from_pretrained(args.model_name_or_path, language=args.language, task="transcribe")
-    processor = WhisperProcessor.from_pretrained(args.model_name_or_path, language=args.language, task="transcribe")
-    model = WhisperForConditionalGeneration.from_pretrained(args.model_name_or_path)
+    tokenizer = WhisperTokenizer.from_pretrained(args.model_name_or_path, language=args.language, task=args.task)
+    processor = WhisperProcessor.from_pretrained(args.model_name_or_path, language=args.language, task=args.task)
+
+    load_kwargs = {}
+    if args.use_qlora:
+        try:
+            from transformers import BitsAndBytesConfig
+            load_kwargs["quantization_config"] = BitsAndBytesConfig(
+                load_in_4bit=True,
+                bnb_4bit_quant_type="nf4",
+                bnb_4bit_use_double_quant=True,
+                bnb_4bit_compute_dtype=torch.float16 if args.fp16 else (torch.bfloat16 if args.bf16 else torch.float32)
+            )
+            load_kwargs["device_map"] = "auto"
+        except ImportError:
+            print("Warning: bitsandbytes not found, falling back to standard loading.")
+
+    model = WhisperForConditionalGeneration.from_pretrained(args.model_name_or_path, **load_kwargs)
 
     # Disable cache for gradient checkpointing compatibility
     model.config.use_cache = False
     model.generate = torch.no_grad()(model.generate)
 
-    if args.use_lora:
-        from peft import LoraConfig, get_peft_model
-        print("Applying LoRA configuration to Whisper...")
+    if args.use_lora or args.use_qlora:
+        from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
+        if args.use_qlora:
+            model = prepare_model_for_kbit_training(model)
+
+        target_modules = [m.strip() for m in args.lora_target_modules.split(",") if m.strip()]
+        print(f"Applying LoRA configuration (r={args.lora_r}, alpha={args.lora_alpha}, targets={target_modules})...")
         lora_config = LoraConfig(
-            r=32,
-            lora_alpha=64,
-            target_modules=["q_proj", "v_proj"],
-            lora_dropout=0.05,
+            r=args.lora_r,
+            lora_alpha=args.lora_alpha,
+            target_modules=target_modules,
+            lora_dropout=args.lora_dropout,
             bias="none"
         )
         model = get_peft_model(model, lora_config)
@@ -123,8 +178,8 @@ def main():
         return batch
 
     print("Preprocessing datasets (extracting Mel features & tokenizing)...")
-    train_dataset = train_dataset.map(prepare_dataset, remove_columns=train_dataset.column_names, num_proc=2)
-    val_dataset = val_dataset.map(prepare_dataset, remove_columns=val_dataset.column_names, num_proc=2)
+    train_dataset = train_dataset.map(prepare_dataset, remove_columns=train_dataset.column_names, num_proc=args.num_proc)
+    val_dataset = val_dataset.map(prepare_dataset, remove_columns=val_dataset.column_names, num_proc=args.num_proc)
 
     data_collator = DataCollatorSpeechSeq2SeqWithPadding(processor=processor)
 
@@ -150,23 +205,31 @@ def main():
     training_args = Seq2SeqTrainingArguments(
         output_dir=args.output_dir,
         per_device_train_batch_size=args.batch_size,
+        per_device_eval_batch_size=eval_bs,
         gradient_accumulation_steps=args.gradient_accumulation_steps,
         learning_rate=args.learning_rate,
-        warmup_steps=50,
+        lr_scheduler_type=args.lr_scheduler_type,
+        optim=args.optim,
+        warmup_steps=args.warmup_steps,
+        weight_decay=args.weight_decay,
+        max_grad_norm=args.max_grad_norm,
         num_train_epochs=args.num_epochs,
-        gradient_checkpointing=True,
+        max_steps=args.max_steps,
+        gradient_checkpointing=args.gradient_checkpointing,
         fp16=args.fp16,
-        per_device_eval_batch_size=args.batch_size,
+        bf16=args.bf16,
+        dataloader_num_workers=args.dataloader_num_workers,
         predict_with_generate=True,
-        generation_max_length=225,
+        generation_max_length=args.generation_max_length,
+        generation_num_beams=args.generation_num_beams,
         save_steps=args.save_steps,
         eval_steps=args.eval_steps,
         logging_steps=args.logging_steps,
-        save_total_limit=2,
+        save_total_limit=args.save_total_limit,
         load_best_model_at_end=True,
-        metric_for_best_model="wer",
+        metric_for_best_model=args.metric_for_best_model,
         greater_is_better=False,
-        report_to=["tensorboard"],
+        report_to=[args.report_to] if args.report_to != "none" else [],
         **eval_kwargs
     )
 
