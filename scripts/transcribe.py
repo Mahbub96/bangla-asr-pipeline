@@ -40,8 +40,8 @@ def get_transcriber(model_size="large-v3-turbo", device=None, compute_type=None,
     print(f"Model loaded in {time.time() - start_time:.2f} seconds.\n")
     return model
 
-def transcribe_file(model, audio_path, language=None, beam_size=5):
-    """Transcribe a single audio file."""
+def transcribe_file(model, audio_path, language=None, beam_size=5, initial_prompt=None, vad_filter=True, temperature=0.0):
+    """Transcribe a single audio file with configurable decoding options."""
     audio_path = Path(audio_path)
     if not audio_path.is_file():
         raise FileNotFoundError(f"Audio file not found: {audio_path}")
@@ -74,13 +74,21 @@ def transcribe_file(model, audio_path, language=None, beam_size=5):
         except Exception:
             lang = None  # Fallback to model's default
 
+    transcribe_kwargs = {
+        "beam_size": beam_size,
+        "language": lang,
+        "vad_filter": vad_filter,
+        "temperature": temperature
+    }
+    if vad_filter:
+        transcribe_kwargs["vad_parameters"] = dict(min_silence_duration_ms=500)
+    if initial_prompt:
+        transcribe_kwargs["initial_prompt"] = initial_prompt.strip()
+
     start_time = time.time()
     segments, info = model.transcribe(
         str(audio_path),
-        beam_size=beam_size,
-        language=lang,
-        vad_filter=True, # filter out non-speech silence
-        vad_parameters=dict(min_silence_duration_ms=500)
+        **transcribe_kwargs
     )
 
     if detected_lang is None:
