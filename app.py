@@ -153,6 +153,8 @@ def evaluate_dataset_ui(metadata_csv, audio_dir, model_name, language_choice):
         audio_full = audio_base / rel_audio
         if not audio_full.is_file() and Path(rel_audio).is_file():
             audio_full = Path(rel_audio)
+        if not audio_full.is_file() and (audio_base / "test_done" / rel_audio).is_file():
+            audio_full = audio_base / "test_done" / rel_audio
 
         if not audio_full.is_file():
             continue
@@ -240,13 +242,33 @@ with gr.Blocks(title="Bangla & English ASR - Whisper") as demo:
 
                     transcribe_btn = gr.Button("🚀 Transcribe Audio", variant="primary", size="lg")
 
-                    # Example Audio Files
-                    examples = [
-                        ["data/test/audio/sample_test1.mp3", "large-v3-turbo", "Auto (Smart Bilingual: Bangla / English)", 5],
-                        ["data/test/audio/complete_Actor - 46_03-01-06-02-04-03-46.wav", "large-v3-turbo", "Auto (Smart Bilingual: Bangla / English)", 5],
-                        ["data/test/audio/sample_test2.mp3", "large-v3-turbo", "Auto (Smart Bilingual: Bangla / English)", 5]
+                    # Example Audio Files (dynamically detected)
+                    candidate_samples = [
+                        "data/test/audio/test.mp3",
+                        "data/test/audio/test_done/test.mp3",
+                        "data/test/audio/sample_test1.mp3",
+                        "data/test/audio/test_done/sample_test1.mp3",
+                        "data/test/audio/sample_test2.mp3",
+                        "data/test/audio/test_done/sample_test2.mp3",
+                        "data/test/audio/complete_Actor - 46_03-01-06-02-04-03-46.wav",
+                        "data/test/audio/test_done/complete_Actor - 46_03-01-06-02-04-03-46.wav",
                     ]
-                    available_examples = [ex for ex in examples if Path(ex[0]).exists()]
+                    available_examples = []
+                    seen_names = set()
+                    for c_path in candidate_samples:
+                        p = Path(c_path)
+                        if p.exists() and p.name not in seen_names:
+                            seen_names.add(p.name)
+                            available_examples.append([str(p), "large-v3-turbo", "Auto (Smart Bilingual: Bangla / English)", 5])
+
+                    if not available_examples:
+                        for p in sorted(Path("data/test/audio").rglob("*")):
+                            if p.suffix.lower() in {".wav", ".mp3", ".flac", ".ogg", ".m4a"} and p.name not in seen_names:
+                                seen_names.add(p.name)
+                                available_examples.append([str(p), "large-v3-turbo", "Auto (Smart Bilingual: Bangla / English)", 5])
+                                if len(available_examples) >= 4:
+                                    break
+
                     if available_examples:
                         gr.Examples(
                             examples=available_examples,
