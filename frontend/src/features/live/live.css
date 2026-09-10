@@ -1,0 +1,251 @@
+.recording-console {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+  border-radius: 10px;
+  background: #101827;
+  color: #eefbf6;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08), 0 16px 32px rgba(16, 24, 39, 0.12);
+}
+
+.recording-console.is-recording {
+  box-shadow: inset 0 0 0 1px rgba(113, 231, 179, 0.28), 0 18px 36px rgba(16, 24, 39, 0.2);
+}
+
+.recording-primary,
+.recording-actions,
+.source-summary,
+.output-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.recording-primary {
+  justify-content: space-between;
+}
+
+.recording-state,
+.recording-time {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 800;
+}
+
+.recording-time {
+  font-variant-numeric: tabular-nums;
+  font-size: 1.75rem;
+  letter-spacing: 0;
+}
+
+.recording-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: #7b8794;
+}
+
+.is-recording .recording-dot {
+  background: #ef4444;
+  animation: recordPulse 1.1s ease-out infinite;
+}
+
+@keyframes recordPulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.55);
+  }
+  100% {
+    box-shadow: 0 0 0 10px rgba(239, 68, 68, 0);
+  }
+}
+
+.live-meter {
+  display: grid;
+  grid-template-columns: repeat(24, 1fr);
+  gap: 3px;
+  height: 16px;
+}
+
+.live-meter span {
+  border-radius: 2px;
+  background: #253246;
+}
+
+.live-meter span.active {
+  background: #34d399;
+}
+
+.live-meter span.active:nth-last-child(-n + 5) {
+  background: #fbbf24;
+}
+
+.waveform {
+  display: grid;
+  gap: 8px;
+  min-height: 190px;
+  padding: 12px;
+  border-radius: 10px;
+  background: #0a111d;
+  border: 1px solid #263548;
+}
+
+.waveform-ruler {
+  display: flex;
+  justify-content: space-between;
+  color: #8ea4bb;
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.waveform-bars {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 132px;
+  padding: 8px 0;
+  overflow: hidden;
+}
+
+.waveform-placeholder {
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 8px;
+  min-height: 132px;
+  color: #8ea4bb;
+  text-align: center;
+}
+
+.waveform-bars span {
+  flex: 1;
+  min-width: 2px;
+  border-radius: 3px;
+  background: #2dd4bf;
+  box-shadow: 0 0 12px rgba(45, 212, 191, 0.12);
+}
+
+.waveform.live .waveform-bars span {
+  background: #34d399;
+}
+
+.audio-preview {
+  width: 100%;
+  accent-color: #10b981;
+}
+
+.recording-actions .btn {
+  border-color: rgba(255, 255, 255, 0.18);
+}
+
+.source-panel {
+  display: grid;
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.source-summary {
+  align-items: stretch;
+}
+
+.source-summary .info {
+  flex: 1;
+  min-width: 180px;
+}
+
+.source-note {
+  margin: 10px 0 0;
+  color: #536275;
+  font-size: 0.9rem;
+}
+
+.options-disclosure {
+  margin-top: 14px;
+  border: 1px solid #d8e2eb;
+  border-radius: 10px;
+  background: #f8fbfd;
+}
+
+.options-disclosure summary {
+  cursor: pointer;
+  padding: 12px 14px;
+  font-weight: 800;
+  color: #26364c;
+}
+
+.options-disclosure .option-grid {
+  padding: 0 14px 14px;
+}
+
+.output-toolbar {
+  margin-bottom: 12px;
+  padding: 4px;
+  border-radius: 9px;
+  background: #eef3f7;
+}
+
+.output-toolbar button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 34px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: #405165;
+  cursor: pointer;
+}
+
+.output-toolbar button.active {
+  background: #ffffff;
+  color: #087a5d;
+  box-shadow: 0 3px 12px rgba(28, 43, 61, 0.08);
+  font-weight: 800;
+}
+
+.structured-empty {
+  display: grid;
+  place-items: center;
+  gap: 8px;
+  min-height: 360px;
+  padding: 24px;
+  text-align: center;
+  color: #5b6b7e;
+  background: #f6f9fb;
+  border-radius: 10px;
+}
+
+.structured-empty strong {
+  color: #172033;
+}
+
+.transcript {
+  width: 100%;
+  min-height: 220px;
+  resize: vertical;
+  border: 1px solid #d6e0ea;
+  border-radius: 10px;
+  padding: 14px;
+  color: #102033;
+  background: #f8fbfd;
+  line-height: 1.65;
+  font-size: 1.03rem;
+}
+
+.transcript.enhanced {
+  min-height: 300px;
+}
+
+.json-view {
+  max-height: 560px;
+  overflow: auto;
+  margin: 0;
+  padding: 14px;
+  border-radius: 10px;
+  background: #111827;
+  color: #bfdbfe;
+  line-height: 1.5;
+  font-size: 0.86rem;
+}

@@ -1,11 +1,14 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App";
-import "./styles/app.css";
+import "./styles/base.css";
+import "./components/ui/ui.css";
+import "./app/AppShell.css";
+import "./features/live/live.css";
+import "./features/jobs/jobs.css";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <App />
   </React.StrictMode>
 );
-

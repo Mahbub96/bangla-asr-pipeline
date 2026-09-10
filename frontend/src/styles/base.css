@@ -1,0 +1,45 @@
+:root {
+  color-scheme: light;
+  font-family: "Noto Sans Bengali", "Segoe UI", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  color: #172033;
+  background: #eef3f7;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+::selection {
+  background: #bfe7d0;
+  color: #10271a;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: #e8eef3;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #9fb0bf;
+  border: 2px solid #e8eef3;
+  border-radius: 999px;
+}
