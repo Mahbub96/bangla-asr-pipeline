@@ -1,17 +1,19 @@
 import { Activity } from "lucide-react";
 import { useState } from "react";
 import { Button, Field } from "../../components/ui";
-import { ASR_LANGUAGES, ASR_MODELS, DEFAULT_AUDIO_DIRECTORY, DEFAULT_METADATA_CSV } from "../../constants/asr";
+import { DEFAULT_AUDIO_DIRECTORY, DEFAULT_METADATA_CSV } from "../../constants/asr";
 import { useJobStream } from "../../hooks/useJobStream";
+import { useTranscriptionOptions } from "../../hooks/useTranscriptionOptions";
 import { postForm } from "../../lib/api";
+import { DecodeOptionsPanel } from "../live/components/DecodeOptionsPanel";
 import { JobLayout } from "../jobs/JobLayout";
 
 export function Benchmark() {
   const [csv, setCsv] = useState<File | null>(null);
   const [csvPath, setCsvPath] = useState(DEFAULT_METADATA_CSV);
   const [audioDir, setAudioDir] = useState(DEFAULT_AUDIO_DIRECTORY);
-  const [model, setModel] = useState("large-v3-turbo");
-  const [language, setLanguage] = useState("auto");
+  const { options, setters, appendOptions } = useTranscriptionOptions();
+  const [compareProfiles, setCompareProfiles] = useState(false);
   const { job, error, setError, attach, cancel } = useJobStream();
 
   async function submit() {
@@ -20,8 +22,8 @@ export function Benchmark() {
       if (csv) form.append("csv_file", csv);
       form.append("metadata_csv_path", csvPath);
       form.append("audio_dir", audioDir);
-      form.append("model_name", model);
-      form.append("language", language);
+      appendOptions(form);
+      form.append("compare_profiles", String(compareProfiles));
       attach(await postForm("/api/evaluate/jobs", form));
     } catch (exc: any) {
       setError(exc.message);
@@ -38,17 +40,12 @@ export function Benchmark() {
         <Field label="Audio directory">
           <input value={audioDir} onChange={(event) => setAudioDir(event.target.value)} />
         </Field>
-        <Field label="Model">
-          <select value={model} onChange={(event) => setModel(event.target.value)}>
-            {ASR_MODELS.map((item) => <option key={item}>{item}</option>)}
-          </select>
-        </Field>
-        <Field label="Language">
-          <select value={language} onChange={(event) => setLanguage(event.target.value)}>
-            {ASR_LANGUAGES.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
-          </select>
-        </Field>
       </div>
+      <DecodeOptionsPanel options={options} setters={setters} />
+      <label className="check">
+        <input type="checkbox" checked={compareProfiles} onChange={(event) => setCompareProfiles(event.target.checked)} />
+        Compare accuracy profiles
+      </label>
       <Button className="primary" onClick={submit}>
         <Activity size={16} />
         Run Benchmark

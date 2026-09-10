@@ -8,6 +8,20 @@ export const ASR_LANGUAGES = [
   { label: "English", value: "en" }
 ];
 
+export const ACCURACY_PROFILES = [
+  { label: "Auto profile", value: "auto" },
+  { label: "Balanced", value: "balanced" },
+  { label: "Bangla High Accuracy", value: "bangla_high_accuracy" },
+  { label: "English Fast", value: "english_fast" }
+];
+
+export const VAD_AGGRESSIVENESS = [
+  { label: "Off", value: "off" },
+  { label: "Low", value: "low" },
+  { label: "Medium", value: "medium" },
+  { label: "High", value: "high" }
+];
+
 export const DEFAULT_BATCH_DIRECTORY = "data/test/audio";
 export const DEFAULT_METADATA_CSV = "data/test/metadata.csv";
 export const DEFAULT_AUDIO_DIRECTORY = "data/test/audio";

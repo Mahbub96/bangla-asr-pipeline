@@ -12,6 +12,12 @@ class TranscriptionOptions(BaseModel):
     vad_filter: bool = True
     device: Literal["auto", "cpu", "cuda"] = "auto"
     compute_type: str = "auto"
+    profile: Literal["auto", "balanced", "bangla_high_accuracy", "english_fast", "fast"] = "auto"
+    chunk_length: int = Field(default=30, ge=0, le=120)
+    vad_aggressiveness: Literal["off", "low", "medium", "high"] = "medium"
+    condition_on_previous_text: bool = True
+    repetition_guard: bool = True
+    hotwords: str | None = None
 
 
 class DirectoryBatchRequest(TranscriptionOptions):
@@ -82,4 +88,3 @@ class JobSnapshot(BaseModel):
     created_at: float
     updated_at: float
     cancel_requested: bool
-

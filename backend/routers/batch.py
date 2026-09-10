@@ -25,11 +25,15 @@ def batch_worker(paths: list[Path], options: TranscriptionOptions):
             job.emit()
             try:
                 result, _ = run_transcription(path, options)
+                quality = result.get("quality", {})
                 rows.append(
                     {
                         "file": path.name,
                         "language": result["language"],
                         "confidence": result["language_probability"],
+                        "profile": quality.get("profile", options.profile),
+                        "repetition_score": quality.get("repetition_score"),
+                        "warnings": " | ".join(quality.get("warnings", [])),
                         "duration_sec": result["duration_sec"],
                         "speed_factor": result["speed_factor"],
                         "text": result["text"],
@@ -57,6 +61,12 @@ async def create_batch_job(
     temperature: float = Form(0.0),
     initial_prompt: str = Form(""),
     vad_filter: bool = Form(True),
+    profile: str = Form("auto"),
+    chunk_length: int = Form(30),
+    vad_aggressiveness: str = Form("medium"),
+    condition_on_previous_text: bool = Form(True),
+    repetition_guard: bool = Form(True),
+    hotwords: str = Form(""),
 ):
     options = TranscriptionOptions(
         model_name=model_name,
@@ -65,6 +75,12 @@ async def create_batch_job(
         temperature=temperature,
         initial_prompt=initial_prompt or None,
         vad_filter=vad_filter,
+        profile=profile,
+        chunk_length=chunk_length,
+        vad_aggressiveness=vad_aggressiveness,
+        condition_on_previous_text=condition_on_previous_text,
+        repetition_guard=repetition_guard,
+        hotwords=hotwords or None,
     )
     paths: list[Path] = []
     if files:
@@ -99,4 +115,3 @@ def create_directory_batch_job(request: DirectoryBatchRequest):
         raise HTTPException(status_code=400, detail="No audio files found")
     job = job_registry.create("batch", batch_worker(paths, request))
     return JobResponse(job_id=job.id, status_url=f"/api/jobs/{job.id}", events_url=f"/api/jobs/{job.id}/events")
-

@@ -6,6 +6,11 @@ export type Segment = {
   start: number;
   end: number;
   text: string;
+  avg_logprob?: number | null;
+  no_speech_prob?: number | null;
+  compression_ratio?: number | null;
+  repetition_score?: number;
+  suspicious?: boolean;
 };
 
 export type TranscriptionResult = {
@@ -17,6 +22,16 @@ export type TranscriptionResult = {
   language_probability: number;
   text: string;
   segments: Segment[];
+  quality?: {
+    profile: string;
+    language_probability: number;
+    low_confidence: boolean;
+    repetition_score: number;
+    suspicious_segment_count: number;
+    warnings: string[];
+    suggested_retry: string;
+    applies_bangla_cleanup: boolean;
+  };
 };
 
 export type TranscriptionPayload = {

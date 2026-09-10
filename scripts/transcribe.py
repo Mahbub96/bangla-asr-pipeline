@@ -40,7 +40,16 @@ def get_transcriber(model_size="large-v3-turbo", device=None, compute_type=None,
     print(f"Model loaded in {time.time() - start_time:.2f} seconds.\n")
     return model
 
-def transcribe_file(model, audio_path, language=None, beam_size=5, initial_prompt=None, vad_filter=True, temperature=0.0):
+def transcribe_file(
+    model,
+    audio_path,
+    language=None,
+    beam_size=5,
+    initial_prompt=None,
+    vad_filter=True,
+    temperature=0.0,
+    **decoder_options,
+):
     """Transcribe a single audio file with configurable decoding options."""
     audio_path = Path(audio_path)
     if not audio_path.is_file():
@@ -84,6 +93,7 @@ def transcribe_file(model, audio_path, language=None, beam_size=5, initial_promp
         transcribe_kwargs["vad_parameters"] = dict(min_silence_duration_ms=500)
     if initial_prompt:
         transcribe_kwargs["initial_prompt"] = initial_prompt.strip()
+    transcribe_kwargs.update({key: value for key, value in decoder_options.items() if value is not None})
 
     start_time = time.time()
     segments, info = model.transcribe(
@@ -100,10 +110,16 @@ def transcribe_file(model, audio_path, language=None, beam_size=5, initial_promp
     full_text_list = []
 
     for seg in segments:
+        avg_logprob = getattr(seg, "avg_logprob", None)
+        no_speech_prob = getattr(seg, "no_speech_prob", None)
+        compression_ratio = getattr(seg, "compression_ratio", None)
         collected_segments.append({
             "start": round(seg.start, 2),
             "end": round(seg.end, 2),
-            "text": seg.text.strip()
+            "text": seg.text.strip(),
+            "avg_logprob": round(avg_logprob, 4) if isinstance(avg_logprob, (int, float)) else None,
+            "no_speech_prob": round(no_speech_prob, 4) if isinstance(no_speech_prob, (int, float)) else None,
+            "compression_ratio": round(compression_ratio, 4) if isinstance(compression_ratio, (int, float)) else None,
         })
         full_text_list.append(seg.text.strip())
 
@@ -121,7 +137,7 @@ def transcribe_file(model, audio_path, language=None, beam_size=5, initial_promp
         "segments": collected_segments
     }
 
-def process_directory(model, dir_path, language=None, output_file=None):
+def process_directory(model, dir_path, language=None, output_file=None, decoder_options=None, postprocess=None):
     """Batch transcribe all audio files in a directory."""
     valid_exts = {".wav", ".mp3", ".flac", ".ogg", ".m4a", ".aac"}
     audio_files = [p for p in Path(dir_path).rglob("*") if p.suffix.lower() in valid_exts]
@@ -136,7 +152,9 @@ def process_directory(model, dir_path, language=None, output_file=None):
     for idx, audio_file in enumerate(audio_files, 1):
         print(f"[{idx}/{len(audio_files)}] Processing: {audio_file.name}")
         try:
-            res = transcribe_file(model, audio_file, language=language)
+            res = transcribe_file(model, audio_file, language=language, **(decoder_options or {}))
+            if postprocess:
+                res = postprocess(res)
             results.append(res)
             print(f"  → Lang: {res['language']} ({res['language_probability']:.2%}) | Duration: {res['duration_sec']}s")
             print(f"  → Text: {res['text']}\n")
@@ -161,6 +179,15 @@ def main():
     parser.add_argument("--compute_type", default=None, help="Quantization type: 'int8', 'float32', 'float16'. Default is 'int8' for CPU.")
     parser.add_argument("--models_dir", default="models", help="Directory where model weights are stored/cached.")
     parser.add_argument("--output", default=None, help="Optional JSON file to save transcription results.")
+    parser.add_argument("--profile", default="auto", choices=["auto", "balanced", "bangla_high_accuracy", "english_fast", "fast"], help="Accuracy profile.")
+    parser.add_argument("--beam_size", type=int, default=5, help="Beam size for decoding.")
+    parser.add_argument("--temperature", type=float, default=0.0, help="Base decoding temperature.")
+    parser.add_argument("--chunk_length", type=int, default=30, help="Chunk length in seconds; 0 disables explicit chunking.")
+    parser.add_argument("--vad_aggressiveness", default="medium", choices=["off", "low", "medium", "high"], help="VAD aggressiveness preset.")
+    parser.add_argument("--condition_on_previous_text", action=argparse.BooleanOptionalAction, default=True, help="Condition decoding on previous text.")
+    parser.add_argument("--repetition_guard", action=argparse.BooleanOptionalAction, default=True, help="Trim repeated token runs and add warnings.")
+    parser.add_argument("--initial_prompt", default=None, help="Optional initial prompt/context hints.")
+    parser.add_argument("--hotwords", default=None, help="Optional hotwords for faster-whisper.")
 
     args = parser.parse_args()
 
@@ -176,9 +203,25 @@ def main():
         compute_type=args.compute_type,
         download_root=args.models_dir
     )
+    from backend.services.quality import postprocess_result, resolve_transcription_quality
+
+    quality = resolve_transcription_quality(
+        profile=args.profile,
+        language=args.language,
+        beam_size=args.beam_size,
+        temperature=args.temperature,
+        vad_filter=args.vad_aggressiveness != "off",
+        vad_aggressiveness=args.vad_aggressiveness,
+        condition_on_previous_text=args.condition_on_previous_text,
+        chunk_length=args.chunk_length,
+        initial_prompt=args.initial_prompt,
+        hotwords=args.hotwords,
+    )
+    postprocess = lambda result: postprocess_result(result, quality.profile, args.repetition_guard)
 
     if input_path.is_file():
-        result = transcribe_file(model, input_path, language=args.language)
+        result = transcribe_file(model, input_path, language=args.language, **quality.transcribe_kwargs)
+        result = postprocess(result)
         print("=" * 60)
         print(f"File: {result['file']}")
         print(f"Detected Language: {result['language']} ({result['language_probability']:.2%})")
@@ -196,7 +239,14 @@ def main():
             print(f"Result saved to {args.output}")
 
     elif input_path.is_dir():
-        process_directory(model, input_path, language=args.language, output_file=args.output)
+        process_directory(
+            model,
+            input_path,
+            language=args.language,
+            output_file=args.output,
+            decoder_options=quality.transcribe_kwargs,
+            postprocess=postprocess,
+        )
 
 if __name__ == "__main__":
     main()
