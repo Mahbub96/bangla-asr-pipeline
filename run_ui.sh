@@ -11,5 +11,7 @@ if [ ! -f "$PYTHON_EXEC" ]; then
     exit 1
 fi
 
-echo "Starting Bangla & English ASR Web UI on http://localhost:7860 ..."
-"$PYTHON_EXEC" app.py
+echo "Starting Bangla & English ASR Web UI Studio..."
+echo "Microphone access works on http://localhost:7860."
+echo "For another browser/device on your network, start with: ./run_ui.sh --ssl"
+"$PYTHON_EXEC" app.py --host 127.0.0.1 "$@"

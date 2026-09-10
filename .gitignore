@@ -54,3 +54,4 @@ events.out.tfevents.*
 Thumbs.db
 .vscode/
 .idea/
+.ssl/

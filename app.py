@@ -200,6 +200,35 @@ def create_temp_export(content: str, suffix: str) -> str:
     t.close()
     return t.name
 
+def sanitize_audio_input(audio_path: str) -> str:
+    """
+    Ensures audio file is in a standardized 16kHz mono WAV format readable by all Whisper backends.
+    Converts browser-specific recordings (WebM/Opus, OGG, MP4/AAC) and repairs stream headers.
+    """
+    p = Path(audio_path)
+    if not p.is_file():
+        raise FileNotFoundError(f"Audio file not found: {audio_path}")
+
+    import shutil
+    if shutil.which("ffmpeg"):
+        try:
+            t = tempfile.NamedTemporaryFile(suffix="_clean.wav", delete=False)
+            t.close()
+            cmd = [
+                "ffmpeg", "-y", "-i", str(p),
+                "-vn",
+                "-acodec", "pcm_s16le",
+                "-ar", "16000",
+                "-ac", "1",
+                t.name
+            ]
+            res = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+            if res.returncode == 0 and Path(t.name).stat().st_size > 0:
+                return t.name
+        except Exception:
+            pass
+    return str(p)
+
 # ==============================================================================
 # Tab 1: Streaming Single Audio & Microphone Handler with Stop Support
 # ==============================================================================
@@ -213,7 +242,11 @@ def transcribe_audio_streaming(audio_path, model_name, language_choice, beam_siz
             gr.update(visible=False),
             gr.update(visible=False),
             gr.update(visible=False),
-            gr.update(visible=False)
+            gr.update(visible=False),
+            gr.update(interactive=False), # transcribe_btn
+            gr.update(interactive=False), # stop_btn
+            gr.update(interactive=False), # clear_btn
+            gr.update(interactive=False)  # copy_btn
         )
         return
 
@@ -231,7 +264,11 @@ def transcribe_audio_streaming(audio_path, model_name, language_choice, beam_siz
         gr.update(visible=False),
         gr.update(visible=False),
         gr.update(visible=False),
-        gr.update(visible=False)
+        gr.update(visible=False),
+        gr.update(interactive=False), # transcribe_btn disabled
+        gr.update(interactive=True),  # stop_btn enabled
+        gr.update(interactive=False), # clear_btn disabled
+        gr.update(interactive=False)  # copy_btn disabled
     )
 
     try:
@@ -239,6 +276,10 @@ def transcribe_audio_streaming(audio_path, model_name, language_choice, beam_siz
         audio_p = Path(audio_path)
         if not audio_p.is_file():
             raise FileNotFoundError(f"Audio file not found: {audio_path}")
+
+        # Sanitize browser audio to guarantee cross-browser decoding
+        clean_audio_path = sanitize_audio_input(str(audio_p))
+        audio_p = Path(clean_audio_path)
 
         INDIC_LANGS = {"hi", "bn", "ur", "as", "mr", "ne", "gu", "pa", "or", "sa"}
         target_lang = lang_code
@@ -254,6 +295,7 @@ def transcribe_audio_streaming(audio_path, model_name, language_choice, beam_siz
                 indic_score = sum(lang_dict.get(l, 0.0) for l in INDIC_LANGS)
                 en_score = lang_dict.get("en", 0.0)
 
+                # Route Indic phonetics to Bangla to mitigate Hindi bias in Whisper
                 if indic_score >= en_score:
                     target_lang = "bn"
                     detected_lang = "bn (Bangla)"
@@ -280,23 +322,27 @@ def transcribe_audio_streaming(audio_path, model_name, language_choice, beam_siz
         segments_gen, info = model.transcribe(str(audio_p), **transcribe_kwargs)
 
         if detected_lang is None:
-            detected_lang = info.language
+            detected_lang = "bn (Bangla)" if info.language == "bn" else ("en (English)" if info.language == "en" else info.language)
             lang_prob = info.language_probability
+
         total_duration = info.duration
-
-        flag = "🇧🇩" if "bn" in str(detected_lang).lower() or "bangla" in str(detected_lang).lower() else "🇬🇧"
-
         collected_segments = []
         full_text_list = []
 
+        flag = "🇧🇩" if "bn" in detected_lang else ("🇬🇧" if "en" in detected_lang else "🌐")
+
         for seg in segments_gen:
+            clean_seg_text = seg.text.strip()
+            if not clean_seg_text:
+                continue
+
             collected_segments.append({
                 "Start (s)": round(seg.start, 2),
                 "End (s)": round(seg.end, 2),
                 "Duration (s)": round(seg.end - seg.start, 2),
-                "Transcription": seg.text.strip()
+                "Transcription": clean_seg_text
             })
-            full_text_list.append(seg.text.strip())
+            full_text_list.append(clean_seg_text)
 
             current_text = " ".join(full_text_list)
             elapsed = time.time() - start_time
@@ -326,7 +372,11 @@ def transcribe_audio_streaming(audio_path, model_name, language_choice, beam_siz
                 gr.update(visible=False),
                 gr.update(visible=False),
                 gr.update(visible=False),
-                gr.update(visible=False)
+                gr.update(visible=False),
+                gr.update(interactive=False), # transcribe_btn
+                gr.update(interactive=True),  # stop_btn
+                gr.update(interactive=False), # clear_btn
+                gr.update(interactive=bool(current_text.strip())) # copy_btn
             )
 
         elapsed_total = time.time() - start_time
@@ -389,7 +439,11 @@ def transcribe_audio_streaming(audio_path, model_name, language_choice, beam_siz
             gr.update(value=txt_p, visible=True),
             gr.update(value=srt_p, visible=True),
             gr.update(value=vtt_p, visible=True),
-            gr.update(value=json_p, visible=True)
+            gr.update(value=json_p, visible=True),
+            gr.update(interactive=True),  # transcribe_btn
+            gr.update(interactive=False), # stop_btn
+            gr.update(interactive=True),  # clear_btn
+            gr.update(interactive=bool(final_text.strip())) # copy_btn
         )
 
     except Exception as e:
@@ -402,11 +456,23 @@ def transcribe_audio_streaming(audio_path, model_name, language_choice, beam_siz
             gr.update(visible=False),
             gr.update(visible=False),
             gr.update(visible=False),
-            gr.update(visible=False)
+            gr.update(visible=False),
+            gr.update(interactive=True),  # transcribe_btn
+            gr.update(interactive=False), # stop_btn
+            gr.update(interactive=True),  # clear_btn
+            gr.update(interactive=False)  # copy_btn
         )
 
-def on_single_transcribe_stop():
-    return "<div style='color: #c2410c; font-weight: 600; padding: 6px 10px; background: #fff7ed; border-radius: 6px; border: 1px solid #fed7aa; font-size: 0.85rem;'>🛑 Transcription stopped by user. Ready for new audio.</div>"
+def on_single_transcribe_stop(current_text, audio_path):
+    has_text = bool(current_text and str(current_text).strip())
+    has_audio = bool(audio_path and str(audio_path).strip())
+    return (
+        "<div style='color: #c2410c; font-weight: 600; padding: 6px 10px; background: #fff7ed; border-radius: 6px; border: 1px solid #fed7aa; font-size: 0.85rem;'>🛑 Transcription stopped by user. Ready for new audio.</div>",
+        gr.update(interactive=has_audio),
+        gr.update(interactive=False),
+        gr.update(interactive=has_audio or has_text),
+        gr.update(interactive=has_text)
+    )
 
 def on_single_clear():
     return (
@@ -418,7 +484,28 @@ def on_single_clear():
         gr.update(visible=False),
         gr.update(visible=False),
         gr.update(visible=False),
-        gr.update(visible=False)
+        gr.update(visible=False),
+        gr.update(interactive=False), # transcribe_btn
+        gr.update(interactive=False), # stop_btn
+        gr.update(interactive=False), # clear_btn
+        gr.update(interactive=False)  # copy_btn
+    )
+
+def on_tab1_audio_change(audio_path, current_text):
+    has_audio = bool(audio_path and str(audio_path).strip())
+    has_text = bool(current_text and str(current_text).strip())
+    return (
+        gr.update(interactive=has_audio),
+        gr.update(interactive=has_audio or has_text),
+        gr.update(interactive=has_text)
+    )
+
+def on_tab1_output_change(current_text, audio_path):
+    has_text = bool(current_text and str(current_text).strip())
+    has_audio = bool(audio_path and str(audio_path).strip())
+    return (
+        gr.update(interactive=has_text),
+        gr.update(interactive=has_audio or has_text)
     )
 
 # ==============================================================================
@@ -430,21 +517,45 @@ def batch_transcribe_streaming(input_mode, uploaded_files, directory_path, model
 
     if input_mode == "Upload Files directly in Browser":
         if not uploaded_files:
-            yield "Please upload at least one audio file.", None, gr.update(visible=False), gr.update(visible=False)
+            yield (
+                "<div style='color: #dc2626; font-weight: 600; padding: 6px 10px; background: #fee2e2; border-radius: 6px; font-size: 0.85rem;'>Please upload at least one audio file.</div>",
+                None,
+                gr.update(visible=False),
+                gr.update(visible=False),
+                gr.update(interactive=False), # batch_btn
+                gr.update(interactive=False), # batch_stop_btn
+                gr.update(interactive=False)  # batch_clear_btn
+            )
             return
         for f in uploaded_files:
             p = Path(f.name if hasattr(f, 'name') else str(f))
             if p.suffix.lower() in valid_exts:
                 audio_paths.append(p)
     else:
-        dir_p = Path(directory_path)
+        dir_p = Path(directory_path) if directory_path else Path("")
         if not dir_p.exists() or not dir_p.is_dir():
-            yield f"Directory '{directory_path}' does not exist on the server.", None, gr.update(visible=False), gr.update(visible=False)
+            yield (
+                f"<div style='color: #dc2626; font-weight: 600; padding: 6px 10px; background: #fee2e2; border-radius: 6px; font-size: 0.85rem;'>Directory '{directory_path}' does not exist on the server.</div>",
+                None,
+                gr.update(visible=False),
+                gr.update(visible=False),
+                gr.update(interactive=False), # batch_btn
+                gr.update(interactive=False), # batch_stop_btn
+                gr.update(interactive=False)  # batch_clear_btn
+            )
             return
         audio_paths = [p for p in dir_p.rglob("*") if p.suffix.lower() in valid_exts]
 
     if not audio_paths:
-        yield "No valid audio files found (.wav, .mp3, .flac, .ogg, .m4a).", None, gr.update(visible=False), gr.update(visible=False)
+        yield (
+            "<div style='color: #dc2626; font-weight: 600; padding: 6px 10px; background: #fee2e2; border-radius: 6px; font-size: 0.85rem;'>No valid audio files found (.wav, .mp3, .flac, .ogg, .m4a).</div>",
+            None,
+            gr.update(visible=False),
+            gr.update(visible=False),
+            gr.update(interactive=True),  # batch_btn
+            gr.update(interactive=False), # batch_stop_btn
+            gr.update(interactive=False)  # batch_clear_btn
+        )
         return
 
     lang_code = {
@@ -457,7 +568,10 @@ def batch_transcribe_streaming(input_mode, uploaded_files, directory_path, model
         f"<div style='background: #eff6ff; color: #1d4ed8; padding: 6px 10px; border-radius: 6px; border: 1px solid #bfdbfe; font-size: 0.85rem; font-weight: 600;'>⏳ Initializing batch processing for {len(audio_paths)} files...</div>",
         None,
         gr.update(visible=False),
-        gr.update(visible=False)
+        gr.update(visible=False),
+        gr.update(interactive=False), # batch_btn
+        gr.update(interactive=True),  # batch_stop_btn
+        gr.update(interactive=False)  # batch_clear_btn
     )
 
     model = load_cached_model(model_name)
@@ -494,10 +608,14 @@ def batch_transcribe_streaming(input_mode, uploaded_files, directory_path, model
         out_csv = create_temp_export(df_curr.to_csv(index=False), ".csv")
         out_json = create_temp_export(json.dumps(results, ensure_ascii=False, indent=2), ".json")
 
+        is_final = (idx + 1 == len(audio_paths))
+        badge_title = "Progress" if not is_final else "Completed"
+        badge_bg = "#ecfdf5" if not is_final else "#dcfce7"
+
         running_html = f"""
         <div style="display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 6px;">
-            <div style="background: #ecfdf5; border: 1px solid #6ee7b7; padding: 6px 12px; border-radius: 6px; flex: 1;">
-                <span style="color: #065f46; font-size: 0.72rem; font-weight: 600; text-transform: uppercase;">Progress</span>
+            <div style="background: {badge_bg}; border: 1px solid #6ee7b7; padding: 6px 12px; border-radius: 6px; flex: 1;">
+                <span style="color: #065f46; font-size: 0.72rem; font-weight: 600; text-transform: uppercase;">{badge_title}</span>
                 <div style="font-size: 1.05rem; font-weight: 700; color: #064e3b; margin-top: 1px;">
                     ✅ {idx + 1} / {len(audio_paths)} Files
                 </div>
@@ -521,11 +639,47 @@ def batch_transcribe_streaming(input_mode, uploaded_files, directory_path, model
             running_html,
             df_curr,
             gr.update(value=out_csv, visible=True),
-            gr.update(value=out_json, visible=True)
+            gr.update(value=out_json, visible=True),
+            gr.update(interactive=is_final),    # batch_btn
+            gr.update(interactive=not is_final),# batch_stop_btn
+            gr.update(interactive=is_final)     # batch_clear_btn: only enabled when batch completed
         )
 
-def on_batch_stop():
-    return "<div style='color: #c2410c; font-weight: 600; padding: 6px 10px; background: #fff7ed; border-radius: 6px; border: 1px solid #fed7aa; font-size: 0.85rem;'>🛑 Batch processing stopped by user. Files completed so far are displayed below.</div>"
+def on_batch_stop(mode, files, dir_path):
+    is_upload = (mode == "Upload Files directly in Browser")
+    can_run = bool(files) if is_upload else bool(dir_path and str(dir_path).strip())
+    return (
+        "<div style='color: #c2410c; font-weight: 600; padding: 6px 10px; background: #fff7ed; border-radius: 6px; border: 1px solid #fed7aa; font-size: 0.85rem;'>🛑 Batch processing stopped by user. Files completed so far are displayed below.</div>",
+        gr.update(interactive=can_run),
+        gr.update(interactive=False),
+        gr.update(interactive=True)
+    )
+
+def on_batch_clear(mode, dir_path):
+    is_dir = (mode != "Upload Files directly in Browser")
+    can_start = is_dir and bool(dir_path and str(dir_path).strip())
+    return (
+        None,
+        "",
+        None,
+        gr.update(visible=False),
+        gr.update(visible=False),
+        gr.update(interactive=can_start),
+        gr.update(interactive=False),
+        gr.update(interactive=False) # Everything is cleared, so clear button disables
+    )
+
+def on_batch_mode_change(mode, files, dir_path):
+    is_upload = (mode == "Upload Files directly in Browser")
+    has_files = bool(files)
+    has_dir = bool(dir_path and str(dir_path).strip())
+    can_run = has_files if is_upload else has_dir
+    return (
+        gr.update(visible=is_upload),
+        gr.update(visible=not is_upload),
+        gr.update(interactive=can_run),
+        gr.update(interactive=has_files) # In upload mode enable if files present; in dir mode disabled until batch runs
+    )
 
 # ==============================================================================
 # Tab 3: Streaming Dataset Benchmark (WER / CER) with Stop Support
@@ -537,7 +691,15 @@ def evaluate_dataset_streaming(csv_file_upload, metadata_csv_path, audio_dir, mo
         csv_p = Path(metadata_csv_path)
 
     if not csv_p.exists():
-        yield f"Error: CSV file '{csv_p}' not found.", "", None, gr.update(visible=False)
+        yield (
+            f"Error: CSV file '{csv_p}' not found.",
+            "",
+            None,
+            gr.update(visible=False),
+            gr.update(interactive=True),
+            gr.update(interactive=False),
+            gr.update(interactive=False)
+        )
         return
 
     df = pd.read_csv(csv_p)
@@ -545,7 +707,15 @@ def evaluate_dataset_streaming(csv_file_upload, metadata_csv_path, audio_dir, mo
     text_col = next((c for c in ["sentence", "transcription", "ground_truth", "text"] if c in df.columns), None)
 
     if not audio_col or not text_col:
-        yield f"Error: CSV must have audio path and text columns. Detected columns: {list(df.columns)}", "", None, gr.update(visible=False)
+        yield (
+            f"Error: CSV must have audio path and text columns. Detected columns: {list(df.columns)}",
+            "",
+            None,
+            gr.update(visible=False),
+            gr.update(interactive=True),
+            gr.update(interactive=False),
+            gr.update(interactive=False)
+        )
         return
 
     lang_code = {
@@ -557,14 +727,25 @@ def evaluate_dataset_streaming(csv_file_upload, metadata_csv_path, audio_dir, mo
     try:
         import jiwer
     except ImportError:
-        yield "Error: jiwer library is required for WER/CER evaluation. Please install it in .venv.", "", None, gr.update(visible=False)
+        yield (
+            "Error: jiwer library is required for WER/CER evaluation. Please install it in .venv.",
+            "",
+            None,
+            gr.update(visible=False),
+            gr.update(interactive=True),
+            gr.update(interactive=False),
+            gr.update(interactive=False)
+        )
         return
 
     yield (
         "Starting benchmark evaluation...",
         f"<div style='background: #eff6ff; color: #1d4ed8; padding: 6px 10px; border-radius: 6px; border: 1px solid #bfdbfe; font-size: 0.85rem; font-weight: 600;'>⏳ Initializing model and preparing {len(df)} dataset rows...</div>",
         None,
-        gr.update(visible=False)
+        gr.update(visible=False),
+        gr.update(interactive=False), # eval_btn
+        gr.update(interactive=True),  # eval_stop_btn
+        gr.update(interactive=False)  # eval_clear_btn
     )
 
     model = load_cached_model(model_name)
@@ -613,6 +794,9 @@ def evaluate_dataset_streaming(csv_file_upload, metadata_csv_path, audio_dir, mo
         wer_color = "#16a34a" if running_wer < 0.15 else ("#ca8a04" if running_wer < 0.35 else "#dc2626")
         cer_color = "#16a34a" if running_cer < 0.10 else ("#ca8a04" if running_cer < 0.25 else "#dc2626")
 
+        is_final = (idx + 1 == len(df))
+        status_label = f"✅ Benchmark Complete: {len(results_df)} / {len(df)} evaluated." if is_final else f"Evaluating: {len(results_df)} / {len(df)} completed..."
+
         summary_cards = f"""
         <div style="display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 6px;">
             <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 6px 12px; flex: 1;">
@@ -638,14 +822,62 @@ def evaluate_dataset_streaming(csv_file_upload, metadata_csv_path, audio_dir, mo
 
         out_csv = create_temp_export(results_df.to_csv(index=False), ".csv")
         yield (
-            f"Evaluating: {len(results_df)} / {len(df)} completed...",
+            status_label,
             summary_cards,
             results_df,
-            gr.update(value=out_csv, visible=True)
+            gr.update(value=out_csv, visible=True),
+            gr.update(interactive=is_final),    # eval_btn
+            gr.update(interactive=not is_final),# eval_stop_btn
+            gr.update(interactive=is_final)     # eval_clear_btn: only enabled when benchmark finished
         )
 
-def on_eval_stop():
-    return "<div style='color: #c2410c; font-weight: 600; padding: 6px 10px; background: #fff7ed; border-radius: 6px; border: 1px solid #fed7aa; font-size: 0.85rem;'>🛑 Benchmark stopped by user. Results preserved below.</div>"
+    if not eval_rows:
+        yield (
+            "No audio files found to benchmark.",
+            "<div style='color: #dc2626; font-weight: 600; padding: 6px 10px; background: #fee2e2; border-radius: 6px;'>❌ No valid audio files found matching metadata CSV.</div>",
+            None,
+            gr.update(visible=False),
+            gr.update(interactive=True),
+            gr.update(interactive=False),
+            gr.update(interactive=False)
+        )
+
+def on_eval_stop(csv_upload, csv_path, audio_dir):
+    has_csv = bool(csv_upload) or bool(csv_path and str(csv_path).strip())
+    has_audio = bool(audio_dir and str(audio_dir).strip())
+    return (
+        "<div style='color: #c2410c; font-weight: 600; padding: 6px 10px; background: #fff7ed; border-radius: 6px; border: 1px solid #fed7aa; font-size: 0.85rem;'>🛑 Benchmark stopped by user. Results preserved below.</div>",
+        gr.update(interactive=has_csv and has_audio),
+        gr.update(interactive=False),
+        gr.update(interactive=True)
+    )
+
+def on_eval_clear(csv_path, audio_dir):
+    has_csv = bool(csv_path and str(csv_path).strip())
+    has_audio = bool(audio_dir and str(audio_dir).strip())
+    return (
+        None, # eval_csv_upload cleared
+        "",   # eval_status
+        "",   # eval_metrics_html
+        None, # eval_results_table
+        gr.update(visible=False), # eval_download_csv
+        gr.update(interactive=has_csv and has_audio),
+        gr.update(interactive=False),
+        gr.update(interactive=False)
+    )
+
+def on_eval_csv_upload_change(csv_upload, csv_path, audio_dir):
+    has_csv = bool(csv_upload) or bool(csv_path and str(csv_path).strip())
+    has_audio = bool(audio_dir and str(audio_dir).strip())
+    return (
+        gr.update(interactive=has_csv and has_audio),
+        gr.update(interactive=bool(csv_upload))
+    )
+
+def on_eval_paths_change(csv_upload, csv_path, audio_dir):
+    has_csv = bool(csv_upload) or bool(csv_path and str(csv_path).strip())
+    has_audio = bool(audio_dir and str(audio_dir).strip())
+    return gr.update(interactive=has_csv and has_audio)
 
 # ==============================================================================
 # Tab 4: Batched Audio Training / Fine-Tuning Manager
@@ -828,17 +1060,35 @@ def start_training_gui(
     global ACTIVE_TRAIN_PROC
 
     if ACTIVE_TRAIN_PROC and ACTIVE_TRAIN_PROC.poll() is None:
-        yield "⚠️ A training run is already in progress. Please abort it first.", "<div style='color: #ea580c;'>Training already active.</div>"
+        yield (
+            "⚠️ A training run is already in progress. Please abort it first.",
+            "<div style='color: #ea580c;'>Training already active.</div>",
+            gr.update(interactive=False), # train_btn
+            gr.update(interactive=True),  # train_stop_btn
+            gr.update(interactive=False)  # train_clear_btn
+        )
         return
 
     missing = [pkg for pkg in ["transformers", "datasets", "peft", "accelerate"] if not _is_pkg_installed(pkg)]
     if missing:
         error_txt = f"❌ Missing required packages for training: {', '.join(missing)}\nPlease run: pip install -r requirements_gpu.txt\n"
-        yield error_txt, f"<div style='color: #dc2626; font-weight: 600;'>{error_txt}</div>"
+        yield (
+            error_txt,
+            f"<div style='color: #dc2626; font-weight: 600;'>{error_txt}</div>",
+            gr.update(interactive=True),  # train_btn
+            gr.update(interactive=False), # train_stop_btn
+            gr.update(interactive=True)   # train_clear_btn
+        )
         return
 
     if not Path(train_csv).is_file():
-        yield f"❌ Train CSV '{train_csv}' does not exist.", "<div style='color: #dc2626;'>Train CSV missing</div>"
+        yield (
+            f"❌ Train CSV '{train_csv}' does not exist.",
+            "<div style='color: #dc2626;'>Train CSV missing</div>",
+            gr.update(interactive=True),  # train_btn
+            gr.update(interactive=False), # train_stop_btn
+            gr.update(interactive=True)   # train_clear_btn
+        )
         return
 
     cmd = [
@@ -910,7 +1160,13 @@ def start_training_gui(
     ]
 
     status_html = f"<div style='background: #eff6ff; color: #1e40af; padding: 6px 10px; border-radius: 6px; border: 1px solid #93c5fd; font-size: 0.85rem; font-weight: 600;'>⏳ Training running (Effective Batch Size: {effective_batch})...</div>"
-    yield "\n".join(log_lines), status_html
+    yield (
+        "\n".join(log_lines),
+        status_html,
+        gr.update(interactive=False), # train_btn
+        gr.update(interactive=True),  # train_stop_btn
+        gr.update(interactive=False)  # train_clear_btn
+    )
 
     try:
         env = os.environ.copy()
@@ -930,7 +1186,13 @@ def start_training_gui(
             log_lines.append(line.rstrip())
             if len(log_lines) > 300:
                 log_lines = log_lines[-300:]
-            yield "\n".join(log_lines), status_html
+            yield (
+                "\n".join(log_lines),
+                status_html,
+                gr.update(interactive=False), # train_btn
+                gr.update(interactive=True),  # train_stop_btn
+                gr.update(interactive=False)  # train_clear_btn
+            )
 
         ACTIVE_TRAIN_PROC.stdout.close()
         code = ACTIVE_TRAIN_PROC.wait()
@@ -943,13 +1205,25 @@ def start_training_gui(
             log_lines.append(f"\n⚠️ Process exited with return code: {code}")
             final_status = f"<div style='background: #fff1f2; color: #9f1239; padding: 6px 10px; border-radius: 6px; border: 1px solid #fecdd3; font-size: 0.85rem; font-weight: 600;'>⚠️ Training stopped or failed (exit code {code}).</div>"
 
-        yield "\n".join(log_lines), final_status
+        yield (
+            "\n".join(log_lines),
+            final_status,
+            gr.update(interactive=True),  # train_btn
+            gr.update(interactive=False), # train_stop_btn
+            gr.update(interactive=True)   # train_clear_btn
+        )
 
     except Exception as e:
         ACTIVE_TRAIN_PROC = None
         err_str = f"\n❌ Failed to execute training subprocess: {str(e)}"
         log_lines.append(err_str)
-        yield "\n".join(log_lines), f"<div style='color: #dc2626;'>{err_str}</div>"
+        yield (
+            "\n".join(log_lines),
+            f"<div style='color: #dc2626;'>{err_str}</div>",
+            gr.update(interactive=True),  # train_btn
+            gr.update(interactive=False), # train_stop_btn
+            gr.update(interactive=True)   # train_clear_btn
+        )
 
 def stop_training_gui():
     global ACTIVE_TRAIN_PROC
@@ -960,10 +1234,44 @@ def stop_training_gui():
             if ACTIVE_TRAIN_PROC.poll() is None:
                 ACTIVE_TRAIN_PROC.kill()
             ACTIVE_TRAIN_PROC = None
-            return "🛑 Training aborted by user.", "<div style='background: #fff7ed; color: #c2410c; padding: 6px 10px; border-radius: 6px; border: 1px solid #fed7aa; font-size: 0.85rem; font-weight: 600;'>🛑 Training process terminated by user.</div>"
+            return (
+                "🛑 Training aborted by user.",
+                "<div style='background: #fff7ed; color: #c2410c; padding: 6px 10px; border-radius: 6px; border: 1px solid #fed7aa; font-size: 0.85rem; font-weight: 600;'>🛑 Training process terminated by user.</div>",
+                gr.update(interactive=True),  # train_btn
+                gr.update(interactive=False), # train_stop_btn
+                gr.update(interactive=True)   # train_clear_btn
+            )
         except Exception as err:
-            return f"Error stopping training: {err}", f"<div style='color: #dc2626;'>{err}</div>"
-    return "No active training process found.", "<div style='color: #64748b; font-size: 0.85rem;'>Idle - No training process active.</div>"
+            return (
+                f"Error stopping training: {err}",
+                f"<div style='color: #dc2626;'>{err}</div>",
+                gr.update(interactive=True),  # train_btn
+                gr.update(interactive=False), # train_stop_btn
+                gr.update(interactive=True)   # train_clear_btn
+            )
+    return (
+        "No active training process found.",
+        "<div style='color: #64748b; font-size: 0.85rem;'>Idle - No training process active.</div>",
+        gr.update(interactive=True),  # train_btn
+        gr.update(interactive=False), # train_stop_btn
+        gr.update(interactive=False)  # train_clear_btn
+    )
+
+def on_train_clear():
+    return (
+        "",
+        "<div style='color: #64748b; font-size: 0.85rem;'>Ready to train. Press <b>Launch Batched Training</b>.</div>",
+        gr.update(interactive=False)
+    )
+
+def on_train_paths_change(train_csv, train_audio):
+    can_train = bool(train_csv and str(train_csv).strip()) and bool(train_audio and str(train_audio).strip())
+    is_running = ACTIVE_TRAIN_PROC is not None and ACTIVE_TRAIN_PROC.poll() is None
+    return gr.update(interactive=can_train and not is_running)
+
+def on_train_verify_change(t_csv, t_aud, v_csv, v_aud):
+    has_all = bool(t_csv and str(t_csv).strip()) and bool(t_aud and str(t_aud).strip()) and bool(v_csv and str(v_csv).strip()) and bool(v_aud and str(v_aud).strip())
+    return gr.update(interactive=has_all)
 
 def _is_pkg_installed(pkg_name):
     try:
@@ -1159,6 +1467,14 @@ html, body {
     border-radius: 50%;
     animation: pulse 1.5s infinite ease-in-out;
 }
+
+/* Disabled button styling for distinct, unmistakable visual state */
+button:disabled, .gr-button:disabled, button[disabled], .disabled, [aria-disabled="true"] {
+    opacity: 0.35 !important;
+    cursor: not-allowed !important;
+    filter: grayscale(80%) !important;
+    pointer-events: none !important;
+}
 """
 
 theme = gr.themes.Soft(
@@ -1166,6 +1482,79 @@ theme = gr.themes.Soft(
     neutral_hue="slate",
     font=[gr.themes.GoogleFont("Inter"), "Noto Sans Bengali", "sans-serif"]
 )
+
+head_js = """
+<script>
+function setAsrMicBadge(text, color, background, borderColor) {
+    const badge = document.getElementById("secure-ctx-badge");
+    if (!badge) return;
+    badge.style.color = color;
+    badge.style.background = background;
+    badge.style.borderColor = borderColor;
+    badge.innerText = text;
+}
+
+async function checkAsrMicrophone(requestAccess = false) {
+    const isLocalhost = ["localhost", "127.0.0.1", "::1"].includes(location.hostname);
+    if (!window.isSecureContext && !isLocalhost) {
+        setAsrMicBadge("⚠️ Use HTTPS for mic", "#c2410c", "#fff7ed", "#fed7aa");
+        return;
+    }
+
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        setAsrMicBadge("⚠️ Browser mic unsupported", "#c2410c", "#fff7ed", "#fed7aa");
+        return;
+    }
+
+    try {
+        if (requestAccess) {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            stream.getTracks().forEach((track) => track.stop());
+        }
+
+        const devices = navigator.mediaDevices.enumerateDevices
+            ? await navigator.mediaDevices.enumerateDevices()
+            : [];
+        const audioInputs = devices.filter((device) => device.kind === "audioinput");
+
+        if (audioInputs.length > 0) {
+            const hasNamedDevice = audioInputs.some((device) => device.label);
+            const text = hasNamedDevice ? "🔒 Mic Ready" : "🎙️ Click Check Mic";
+            setAsrMicBadge(text, "#059669", "#ecfdf5", "#a7f3d0");
+        } else {
+            setAsrMicBadge("⚠️ No mic detected", "#c2410c", "#fff7ed", "#fed7aa");
+        }
+    } catch (err) {
+        const denied = err && ["NotAllowedError", "SecurityError", "PermissionDeniedError"].includes(err.name);
+        const text = denied ? "⚠️ Mic permission blocked" : "⚠️ Mic unavailable";
+        setAsrMicBadge(text, "#c2410c", "#fff7ed", "#fed7aa");
+    }
+}
+
+window.checkAsrMicrophone = checkAsrMicrophone;
+
+window.addEventListener("DOMContentLoaded", () => {
+    if (location.hostname === "0.0.0.0") {
+        location.replace(`${location.protocol}//127.0.0.1:${location.port}${location.pathname}${location.search}${location.hash}`);
+        return;
+    }
+
+    checkAsrMicrophone(false);
+    document.addEventListener("click", (event) => {
+        const target = event.target;
+        if (target && target.id === "mic-permission-check") {
+            checkAsrMicrophone(true);
+        }
+    });
+
+    setInterval(() => {
+        const badge = document.getElementById("secure-ctx-badge");
+        if (!badge) return;
+        checkAsrMicrophone(false);
+    }, 5000);
+});
+</script>
+"""
 
 with gr.Blocks(title="Bangla & English ASR - Whisper") as demo:
     # Header Banner (Compact)
@@ -1200,10 +1589,22 @@ with gr.Blocks(title="Bangla & English ASR - Whisper") as demo:
         with gr.TabItem("🎯 Live Mic & Audio"):
             with gr.Row():
                 with gr.Column(scale=1):
+                    gr.HTML("""
+                    <div style="display: flex; justify-content: space-between; align-items: center; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 4px 10px; margin-bottom: 4px; gap: 8px;">
+                        <span style="font-size: 0.80rem; color: #334155; font-weight: 600;">🎙️ Direct Record & Transcribe: Click mic to speak, stop to auto-transcribe</span>
+                        <span style="display: flex; gap: 6px; align-items: center; flex-shrink: 0;">
+                            <button id="mic-permission-check" type="button" style="border: 1px solid #a7f3d0; background: #ecfdf5; color: #047857; border-radius: 8px; padding: 1px 7px; font-size: 0.72rem; font-weight: 700; cursor: pointer;">Check Mic</button>
+                            <span id="secure-ctx-badge" style="font-size: 0.72rem; font-weight: 600; color: #64748b; background: #f8fafc; border: 1px solid #cbd5e1; padding: 1px 6px; border-radius: 8px;">Checking mic...</span>
+                        </span>
+                    </div>
+                    """)
+
                     audio_input = gr.Audio(
                         sources=["microphone", "upload"],
                         type="filepath",
-                        label="Record Speech or Upload Audio File"
+                        format="wav",
+                        label="Record Speech or Upload Audio File",
+                        interactive=True
                     )
 
                     with gr.Accordion("⚙️ Model & Quality Tuning", open=False):
@@ -1237,9 +1638,9 @@ with gr.Blocks(title="Bangla & English ASR - Whisper") as demo:
                         )
 
                     with gr.Row():
-                        transcribe_btn = gr.Button("🚀 Transcribe", variant="primary", size="sm", scale=2)
-                        stop_btn = gr.Button("🛑 Stop", variant="stop", size="sm", scale=1)
-                        clear_btn = gr.Button("🗑️ Clear", variant="secondary", size="sm", scale=1)
+                        transcribe_btn = gr.Button("🚀 Transcribe", variant="primary", size="sm", scale=2, interactive=False)
+                        stop_btn = gr.Button("🛑 Stop", variant="stop", size="sm", scale=1, interactive=False)
+                        clear_btn = gr.Button("🗑️ Clear", variant="secondary", size="sm", scale=1, interactive=False)
 
                     candidate_samples = [
                         "data/test/audio/test.mp3",
@@ -1277,7 +1678,7 @@ with gr.Blocks(title="Bangla & English ASR - Whisper") as demo:
                 with gr.Column(scale=1):
                     with gr.Row():
                         gr.Markdown("##### 📝 Transcribed Output")
-                        copy_btn = gr.Button("📋 Copy Text", size="sm", variant="secondary")
+                        copy_btn = gr.Button("📋 Copy Text", size="sm", variant="secondary", interactive=False)
 
                     output_text = gr.Textbox(
                         label="",
@@ -1309,14 +1710,25 @@ with gr.Blocks(title="Bangla & English ASR - Whisper") as demo:
             transcribe_event = transcribe_btn.click(
                 fn=transcribe_audio_streaming,
                 inputs=[audio_input, model_dropdown, lang_dropdown, beam_slider, temp_slider, prompt_input, vad_checkbox],
-                outputs=[output_text, metrics_output, segments_table, json_output, download_txt, download_srt, download_vtt, download_json]
+                outputs=[output_text, metrics_output, segments_table, json_output, download_txt, download_srt, download_vtt, download_json, transcribe_btn, stop_btn, clear_btn, copy_btn]
+            )
+
+            mic_event = audio_input.stop_recording(
+                fn=transcribe_audio_streaming,
+                inputs=[audio_input, model_dropdown, lang_dropdown, beam_slider, temp_slider, prompt_input, vad_checkbox],
+                outputs=[output_text, metrics_output, segments_table, json_output, download_txt, download_srt, download_vtt, download_json, transcribe_btn, stop_btn, clear_btn, copy_btn]
+            )
+
+            audio_input.start_recording(
+                fn=lambda: (gr.update(interactive=False), gr.update(interactive=False)),
+                outputs=[transcribe_btn, clear_btn]
             )
 
             stop_btn.click(
                 fn=on_single_transcribe_stop,
-                inputs=None,
-                outputs=[metrics_output],
-                cancels=[transcribe_event]
+                inputs=[output_text, audio_input],
+                outputs=[metrics_output, transcribe_btn, stop_btn, clear_btn, copy_btn],
+                cancels=[transcribe_event, mic_event]
             )
 
             copy_btn.click(
@@ -1327,8 +1739,26 @@ with gr.Blocks(title="Bangla & English ASR - Whisper") as demo:
 
             clear_btn.click(
                 fn=on_single_clear,
-                outputs=[audio_input, output_text, metrics_output, segments_table, json_output, download_txt, download_srt, download_vtt, download_json],
-                cancels=[transcribe_event]
+                outputs=[audio_input, output_text, metrics_output, segments_table, json_output, download_txt, download_srt, download_vtt, download_json, transcribe_btn, stop_btn, clear_btn, copy_btn],
+                cancels=[transcribe_event, mic_event]
+            )
+
+            audio_input.change(
+                fn=on_tab1_audio_change,
+                inputs=[audio_input, output_text],
+                outputs=[transcribe_btn, clear_btn, copy_btn]
+            )
+
+            audio_input.clear(
+                fn=on_tab1_audio_change,
+                inputs=[audio_input, output_text],
+                outputs=[transcribe_btn, clear_btn, copy_btn]
+            )
+
+            output_text.change(
+                fn=on_tab1_output_change,
+                inputs=[output_text, audio_input],
+                outputs=[copy_btn, clear_btn]
             )
 
         # ======================================================================
@@ -1356,12 +1786,6 @@ with gr.Blocks(title="Bangla & English ASR - Whisper") as demo:
                         visible=False
                     )
 
-                    batch_mode.change(
-                        fn=lambda mode: (gr.update(visible=mode == "Upload Files directly in Browser"), gr.update(visible=mode != "Upload Files directly in Browser")),
-                        inputs=[batch_mode],
-                        outputs=[batch_files_upload, batch_dir_input]
-                    )
-
                     with gr.Row():
                         batch_model = gr.Dropdown(choices=["large-v3-turbo", "tiny"], value="large-v3-turbo", label="Model")
                         batch_lang = gr.Dropdown(
@@ -1371,8 +1795,9 @@ with gr.Blocks(title="Bangla & English ASR - Whisper") as demo:
                         )
 
                     with gr.Row():
-                        batch_btn = gr.Button("⚡ Start Batch", variant="primary", size="sm", scale=2)
-                        batch_stop_btn = gr.Button("🛑 Stop Batch", variant="stop", size="sm", scale=1)
+                        batch_btn = gr.Button("⚡ Start Batch", variant="primary", size="sm", scale=2, interactive=False)
+                        batch_stop_btn = gr.Button("🛑 Stop Batch", variant="stop", size="sm", scale=1, interactive=False)
+                        batch_clear_btn = gr.Button("🗑️ Clear", variant="secondary", size="sm", scale=1, interactive=False)
 
                 with gr.Column(scale=1):
                     batch_status_html = gr.HTML()
@@ -1390,13 +1815,44 @@ with gr.Blocks(title="Bangla & English ASR - Whisper") as demo:
             batch_event = batch_btn.click(
                 fn=batch_transcribe_streaming,
                 inputs=[batch_mode, batch_files_upload, batch_dir_input, batch_model, batch_lang],
-                outputs=[batch_status_html, batch_table, batch_download_csv, batch_download_json]
+                outputs=[batch_status_html, batch_table, batch_download_csv, batch_download_json, batch_btn, batch_stop_btn, batch_clear_btn]
             )
 
             batch_stop_btn.click(
                 fn=on_batch_stop,
-                outputs=[batch_status_html],
+                inputs=[batch_mode, batch_files_upload, batch_dir_input],
+                outputs=[batch_status_html, batch_btn, batch_stop_btn, batch_clear_btn],
                 cancels=[batch_event]
+            )
+
+            batch_clear_btn.click(
+                fn=on_batch_clear,
+                inputs=[batch_mode, batch_dir_input],
+                outputs=[batch_files_upload, batch_status_html, batch_table, batch_download_csv, batch_download_json, batch_btn, batch_stop_btn, batch_clear_btn],
+                cancels=[batch_event]
+            )
+
+            batch_mode.change(
+                fn=on_batch_mode_change,
+                inputs=[batch_mode, batch_files_upload, batch_dir_input],
+                outputs=[batch_files_upload, batch_dir_input, batch_btn, batch_clear_btn]
+            )
+
+            batch_files_upload.change(
+                fn=lambda f: (gr.update(interactive=bool(f)), gr.update(interactive=bool(f))),
+                inputs=[batch_files_upload],
+                outputs=[batch_btn, batch_clear_btn]
+            )
+
+            batch_files_upload.clear(
+                fn=lambda: (gr.update(interactive=False), gr.update(interactive=False)),
+                outputs=[batch_btn, batch_clear_btn]
+            )
+
+            batch_dir_input.change(
+                fn=lambda d: gr.update(interactive=bool(d and str(d).strip())),
+                inputs=[batch_dir_input],
+                outputs=[batch_btn]
             )
 
         # ======================================================================
@@ -1418,8 +1874,9 @@ with gr.Blocks(title="Bangla & English ASR - Whisper") as demo:
                         )
 
                     with gr.Row():
-                        eval_btn = gr.Button("📈 Run Benchmark", variant="primary", size="sm", scale=2)
-                        eval_stop_btn = gr.Button("🛑 Stop", variant="stop", size="sm", scale=1)
+                        eval_btn = gr.Button("📈 Run Benchmark", variant="primary", size="sm", scale=2, interactive=True)
+                        eval_stop_btn = gr.Button("🛑 Stop", variant="stop", size="sm", scale=1, interactive=False)
+                        eval_clear_btn = gr.Button("🗑️ Clear", variant="secondary", size="sm", scale=1, interactive=False)
 
                 with gr.Column(scale=1):
                     eval_status = gr.Markdown()
@@ -1436,13 +1893,45 @@ with gr.Blocks(title="Bangla & English ASR - Whisper") as demo:
             eval_event = eval_btn.click(
                 fn=evaluate_dataset_streaming,
                 inputs=[eval_csv_upload, eval_csv_input, eval_audio_dir, eval_model, eval_lang],
-                outputs=[eval_status, eval_metrics_html, eval_results_table, eval_download_csv]
+                outputs=[eval_status, eval_metrics_html, eval_results_table, eval_download_csv, eval_btn, eval_stop_btn, eval_clear_btn]
             )
 
             eval_stop_btn.click(
                 fn=on_eval_stop,
-                outputs=[eval_status],
+                inputs=[eval_csv_upload, eval_csv_input, eval_audio_dir],
+                outputs=[eval_status, eval_btn, eval_stop_btn, eval_clear_btn],
                 cancels=[eval_event]
+            )
+
+            eval_clear_btn.click(
+                fn=on_eval_clear,
+                inputs=[eval_csv_input, eval_audio_dir],
+                outputs=[eval_csv_upload, eval_status, eval_metrics_html, eval_results_table, eval_download_csv, eval_btn, eval_stop_btn, eval_clear_btn],
+                cancels=[eval_event]
+            )
+
+            eval_csv_upload.change(
+                fn=on_eval_csv_upload_change,
+                inputs=[eval_csv_upload, eval_csv_input, eval_audio_dir],
+                outputs=[eval_btn, eval_clear_btn]
+            )
+
+            eval_csv_upload.clear(
+                fn=on_eval_csv_upload_change,
+                inputs=[eval_csv_upload, eval_csv_input, eval_audio_dir],
+                outputs=[eval_btn, eval_clear_btn]
+            )
+
+            eval_csv_input.change(
+                fn=on_eval_paths_change,
+                inputs=[eval_csv_upload, eval_csv_input, eval_audio_dir],
+                outputs=[eval_btn]
+            )
+
+            eval_audio_dir.change(
+                fn=on_eval_paths_change,
+                inputs=[eval_csv_upload, eval_csv_input, eval_audio_dir],
+                outputs=[eval_btn]
             )
 
         # ======================================================================
@@ -1601,8 +2090,9 @@ with gr.Blocks(title="Bangla & English ASR - Whisper") as demo:
                     )
 
                     with gr.Row():
-                        train_btn = gr.Button("🚀 Launch Batched Training", variant="primary", size="sm", scale=2)
-                        train_stop_btn = gr.Button("🛑 Abort Training", variant="stop", size="sm", scale=1)
+                        train_btn = gr.Button("🚀 Launch Batched Training", variant="primary", size="sm", scale=2, interactive=True)
+                        train_stop_btn = gr.Button("🛑 Abort Training", variant="stop", size="sm", scale=1, interactive=False)
+                        train_clear_btn = gr.Button("🗑️ Clear Logs", variant="secondary", size="sm", scale=1, interactive=False)
 
                     with gr.Accordion("📋 View CLI Command", open=False):
                         cli_code_output = gr.Code(language="shell", label="Command for Remote Servers / Cloud")
@@ -1634,15 +2124,33 @@ with gr.Blocks(title="Bangla & English ASR - Whisper") as demo:
                 outputs=[cli_code_output]
             )
 
-            train_btn.click(
+            train_event = train_btn.click(
                 fn=start_training_gui,
                 inputs=all_train_inputs,
-                outputs=[train_log_box, train_status_banner]
+                outputs=[train_log_box, train_status_banner, train_btn, train_stop_btn, train_clear_btn]
             )
 
             train_stop_btn.click(
                 fn=stop_training_gui,
-                outputs=[train_log_box, train_status_banner]
+                outputs=[train_log_box, train_status_banner, train_btn, train_stop_btn, train_clear_btn],
+                cancels=[train_event]
+            )
+
+            train_clear_btn.click(
+                fn=on_train_clear,
+                outputs=[train_log_box, train_status_banner, train_clear_btn]
+            )
+
+            train_csv_box.change(fn=on_train_paths_change, inputs=[train_csv_box, train_audio_box], outputs=[train_btn])
+            train_audio_box.change(fn=on_train_paths_change, inputs=[train_csv_box, train_audio_box], outputs=[train_btn])
+
+            for verify_input_comp in [train_csv_box, train_audio_box, val_csv_box, val_audio_box]:
+                verify_input_comp.change(fn=on_train_verify_change, inputs=[train_csv_box, train_audio_box, val_csv_box, val_audio_box], outputs=[verify_data_btn])
+
+            train_log_box.change(
+                fn=lambda text: gr.update(interactive=bool(text and str(text).strip()) and (ACTIVE_TRAIN_PROC is None or ACTIVE_TRAIN_PROC.poll() is not None)),
+                inputs=[train_log_box],
+                outputs=[train_clear_btn]
             )
 
         # ======================================================================
@@ -1653,6 +2161,55 @@ with gr.Blocks(title="Bangla & English ASR - Whisper") as demo:
             refresh_diag_btn = gr.Button("🔄 Refresh Diagnostics", size="sm", variant="secondary")
             refresh_diag_btn.click(fn=get_diagnostics, outputs=[diag_output])
 
+def parse_ui_args():
+    import argparse
+    parser = argparse.ArgumentParser(description="Bangla & English ASR Web UI Studio")
+    parser.add_argument("--host", default=os.getenv("GRADIO_SERVER_NAME", "127.0.0.1"), help="Host address to bind to (default: 127.0.0.1 for local microphone access)")
+    parser.add_argument("--port", type=int, default=int(os.getenv("GRADIO_SERVER_PORT", "7860")), help="Port to bind to (default: 7860)")
+    parser.add_argument("--ssl", action="store_true", help="Enable HTTPS with auto-generated self-signed SSL certificate for cross-browser microphone access")
+    parser.add_argument("--ssl_certfile", default=os.getenv("GRADIO_SSL_CERTFILE", None), help="Custom SSL certificate file path")
+    parser.add_argument("--ssl_keyfile", default=os.getenv("GRADIO_SSL_KEYFILE", None), help="Custom SSL private key file path")
+    parser.add_argument("--share", action="store_true", help="Create a public Gradio HTTPS share link for remote access from any browser/device")
+    return parser.parse_args()
+
 if __name__ == "__main__":
+    args = parse_ui_args()
+
+    certfile = args.ssl_certfile
+    keyfile = args.ssl_keyfile
+    use_ssl = args.ssl or bool(certfile and keyfile) or (os.getenv("SSL", "0").lower() in ("1", "true", "yes"))
+
+    if use_ssl and (not certfile or not keyfile):
+        ssl_dir = SCRIPT_DIR / ".ssl"
+        ssl_dir.mkdir(parents=True, exist_ok=True)
+        certfile = str(ssl_dir / "cert.pem")
+        keyfile = str(ssl_dir / "key.pem")
+        if not Path(certfile).exists() or not Path(keyfile).exists():
+            print("🔑 Generating self-signed SSL certificate in .ssl/ for cross-browser microphone access...")
+            subprocess.run([
+                "openssl", "req", "-x509", "-newkey", "rsa:2048",
+                "-keyout", keyfile, "-out", certfile,
+                "-sha256", "-days", "365", "-nodes",
+                "-subj", "/CN=localhost"
+            ], check=True)
+
+    launch_kwargs = {
+        "server_name": args.host,
+        "server_port": args.port,
+        "share": args.share,
+        "theme": theme,
+        "css": custom_css,
+        "head": head_js
+    }
+    if use_ssl:
+        launch_kwargs["ssl_certfile"] = certfile
+        launch_kwargs["ssl_keyfile"] = keyfile
+        launch_kwargs["ssl_verify"] = False
+        print(f"🔒 HTTPS enabled: Access via https://{args.host}:{args.port}")
+        print("💡 Note: Accept the browser self-signed certificate warning once to enable microphone from any device/browser.")
+    else:
+        print(f"🌐 Running on HTTP: http://{args.host}:{args.port}")
+        print("💡 Note: For remote browser microphone access, run with './run_ui.sh --ssl' or access via localhost.")
+
     demo.queue()
-    demo.launch(server_name="0.0.0.0", server_port=7860, share=False, theme=theme, css=custom_css)
+    demo.launch(**launch_kwargs)

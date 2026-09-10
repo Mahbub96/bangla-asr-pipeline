@@ -110,10 +110,19 @@ pip install -r requirements.txt
 ### 2. Launch the Interactive Web UI Studio
 Launch the browser-based dashboard:
 ```bash
+# Standard local launch (http://localhost:7860)
 ./run_ui.sh
+
+# Cross-browser / Remote device launch with HTTPS for microphone access (https://0.0.0.0:7860)
+./run_ui.sh --ssl
+
+# Public HTTPS link via Gradio Share for remote testing
+./run_ui.sh --share
 ```
-Then open **http://localhost:7860** in your browser to access:
-- **🎯 Live Mic & Audio**: Real-time transcription with streaming text, audio playback, and instant stop controls.
+Then open **http://localhost:7860** (or **https://<your-ip>:7860** with `--ssl`) in your browser to access:
+- **🎯 Live Mic & Audio**: 
+  - **Direct Record & Transcribe**: Click the microphone icon to record speech and click stop to automatically stream the transcription live—no extra button clicks required.
+  - Cross-browser audio normalization converts WebM, OGG, and MP4/AAC streams directly to clean 16kHz WAV via FFmpeg.
 - **📂 Batch Audio**: Folder or multi-file audio batch processing with live streaming tables.
 - **📊 Benchmark (WER / CER)**: Error rate calculation and dataset validation against ground truth.
 - **🏋️ Batched Training**: Full training hyperparameter suite (36+ parameters) with live console logs.
