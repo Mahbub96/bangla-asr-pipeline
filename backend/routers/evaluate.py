@@ -116,6 +116,7 @@ async def create_evaluate_job(
     repetition_guard: bool = Form(True),
     hotwords: str = Form(""),
     compare_profiles: bool = Form(False),
+    output_script: str = Form("native"),
 ):
     if csv_file:
         target = tempfile.NamedTemporaryFile(suffix=".csv", delete=False)
@@ -138,6 +139,7 @@ async def create_evaluate_job(
         condition_on_previous_text=condition_on_previous_text,
         repetition_guard=repetition_guard,
         hotwords=hotwords or None,
+        output_script=output_script,
     )
     if not Path(request.metadata_csv_path).is_absolute() and not (ROOT_DIR / request.metadata_csv_path).is_file():
         raise HTTPException(status_code=400, detail=f"CSV not found: {request.metadata_csv_path}")

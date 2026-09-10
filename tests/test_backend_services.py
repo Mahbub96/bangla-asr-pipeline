@@ -6,7 +6,7 @@ from backend.main import app
 from backend.schemas import EvaluateRequest
 from backend.services.exports import generate_srt, generate_vtt
 from backend.services.jobs import Job
-from backend.services.quality import postprocess_result, resolve_profile, resolve_transcription_quality
+from backend.services.quality import postprocess_result, resolve_profile, resolve_transcription_quality, transliterate_bangla_to_banglish
 from backend.services.training import build_training_args, relative_command
 
 
@@ -74,6 +74,25 @@ def test_postprocess_flags_low_confidence_and_trims_repetition():
     assert processed["segments"][0]["suspicious"] is True
 
 
+def test_bangla_can_be_returned_as_banglish():
+    assert transliterate_bangla_to_banglish("আমি ভালো আছি") == "ami valo achi"
+    processed = postprocess_result(
+        {
+            "language": "bn (Bangla)",
+            "language_probability": 0.9,
+            "text": "আমি ভালো আছি",
+            "segments": [{"start": 0, "end": 1, "text": "আমি ভালো আছি"}],
+        },
+        "bangla_high_accuracy",
+        output_script="banglish",
+    )
+
+    assert processed["text"] == "ami valo achi"
+    assert processed["native_text"] == "আমি ভালো আছি"
+    assert processed["segments"][0]["native_text"] == "আমি ভালো আছি"
+    assert processed["quality"]["output_script"] == "banglish"
+
+
 def test_evaluate_request_accepts_accuracy_options():
     request = EvaluateRequest(
         profile="bangla_high_accuracy",
@@ -122,6 +141,7 @@ def test_transcribe_endpoint_accepts_accuracy_fields(monkeypatch, tmp_path):
             "condition_on_previous_text": "false",
             "repetition_guard": "true",
             "hotwords": "সংসদ কৃষক সার",
+            "output_script": "banglish",
         },
     )
 
@@ -130,3 +150,4 @@ def test_transcribe_endpoint_accepts_accuracy_fields(monkeypatch, tmp_path):
     assert captured["options"].chunk_length == 20
     assert captured["options"].vad_aggressiveness == "high"
     assert captured["options"].condition_on_previous_text is False
+    assert captured["options"].output_script == "banglish"

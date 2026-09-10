@@ -188,6 +188,7 @@ def main():
     parser.add_argument("--repetition_guard", action=argparse.BooleanOptionalAction, default=True, help="Trim repeated token runs and add warnings.")
     parser.add_argument("--initial_prompt", default=None, help="Optional initial prompt/context hints.")
     parser.add_argument("--hotwords", default=None, help="Optional hotwords for faster-whisper.")
+    parser.add_argument("--output_script", default="native", choices=["native", "banglish"], help="Output script for Bangla text.")
 
     args = parser.parse_args()
 
@@ -217,7 +218,7 @@ def main():
         initial_prompt=args.initial_prompt,
         hotwords=args.hotwords,
     )
-    postprocess = lambda result: postprocess_result(result, quality.profile, args.repetition_guard)
+    postprocess = lambda result: postprocess_result(result, quality.profile, args.repetition_guard, args.output_script)
 
     if input_path.is_file():
         result = transcribe_file(model, input_path, language=args.language, **quality.transcribe_kwargs)

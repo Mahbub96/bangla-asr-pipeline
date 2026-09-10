@@ -6,6 +6,7 @@ export type Segment = {
   start: number;
   end: number;
   text: string;
+  native_text?: string;
   avg_logprob?: number | null;
   no_speech_prob?: number | null;
   compression_ratio?: number | null;
@@ -21,9 +22,11 @@ export type TranscriptionResult = {
   language: string;
   language_probability: number;
   text: string;
+  native_text?: string;
   segments: Segment[];
   quality?: {
     profile: string;
+    output_script?: string;
     language_probability: number;
     low_confidence: boolean;
     repetition_score: number;
@@ -89,7 +92,25 @@ export type TrainingConfig = {
 };
 
 export type StudioTab = "live" | "batch" | "benchmark" | "training" | "diagnostics";
-export type OutputView = "transcript" | "segments" | "raw";
+export type OutputView = "transcript" | "segments" | "raw" | "debug";
+
+export type LiveDebugState = {
+  status: "idle" | "recording" | "ready" | "transcribing" | "complete" | "failed";
+  source: {
+    type: "none" | "microphone" | "upload";
+    name: string;
+    mime_type: string;
+    duration_sec: number;
+  };
+  request: Record<string, unknown>;
+  timing: {
+    submitted_at?: string;
+    completed_at?: string;
+    elapsed_ms?: number;
+  };
+  error?: string;
+  backend_quality?: TranscriptionResult["quality"];
+};
 
 export type RecorderState = {
   micState: MicState;

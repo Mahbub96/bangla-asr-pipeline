@@ -22,6 +22,11 @@ export const VAD_AGGRESSIVENESS = [
   { label: "High", value: "high" }
 ];
 
+export const OUTPUT_SCRIPTS = [
+  { label: "Native script", value: "native" },
+  { label: "Banglish", value: "banglish" }
+];
+
 export const DEFAULT_BATCH_DIRECTORY = "data/test/audio";
 export const DEFAULT_METADATA_CSV = "data/test/metadata.csv";
 export const DEFAULT_AUDIO_DIRECTORY = "data/test/audio";

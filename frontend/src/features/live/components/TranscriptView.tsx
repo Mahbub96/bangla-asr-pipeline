@@ -9,6 +9,7 @@ export function TranscriptView({ result }: { result: TranscriptionResult }) {
         <div className="quality-strip">
           <span className={quality.low_confidence ? "quality-badge bad" : "quality-badge good"}>Confidence {Math.round(quality.language_probability * 100)}%</span>
           <span className="quality-badge">Profile {quality.profile}</span>
+          {quality.output_script && <span className="quality-badge">Output {quality.output_script}</span>}
           <span className={quality.repetition_score > 0.12 ? "quality-badge warn" : "quality-badge good"}>Repetition {Math.round(quality.repetition_score * 100)}%</span>
         </div>
       )}
@@ -19,6 +20,12 @@ export function TranscriptView({ result }: { result: TranscriptionResult }) {
         </div>
       ) : null}
       <textarea className="transcript enhanced" value={result.text ?? ""} readOnly />
+      {result.native_text && (
+        <details className="native-text-disclosure">
+          <summary>Original Bangla transcript</summary>
+          <textarea className="transcript native-backup" value={result.native_text} readOnly />
+        </details>
+      )}
       <MetricGrid
         items={[
           { label: "Language", value: result.language },

@@ -7,6 +7,7 @@ from typing import Any, Literal
 
 TranscriptionProfile = Literal["auto", "balanced", "bangla_high_accuracy", "english_fast", "fast"]
 VadAggressiveness = Literal["off", "low", "medium", "high"]
+OutputScript = Literal["native", "banglish"]
 
 
 BANGLA_DOMAIN_PROMPT = (
@@ -156,7 +157,120 @@ def collapse_repeated_runs(text: str, max_run: int = 3) -> tuple[str, bool]:
     return " ".join(collapsed), changed
 
 
-def postprocess_result(result: dict[str, Any], profile: str, repetition_guard: bool = True) -> dict[str, Any]:
+INDEPENDENT_VOWELS = {
+    "অ": "o",
+    "আ": "a",
+    "ই": "i",
+    "ঈ": "i",
+    "উ": "u",
+    "ঊ": "u",
+    "ঋ": "ri",
+    "এ": "e",
+    "ঐ": "oi",
+    "ও": "o",
+    "ঔ": "ou",
+}
+
+VOWEL_SIGNS = {
+    "া": "a",
+    "ি": "i",
+    "ী": "i",
+    "ু": "u",
+    "ূ": "u",
+    "ৃ": "ri",
+    "ে": "e",
+    "ৈ": "oi",
+    "ো": "o",
+    "ৌ": "ou",
+}
+
+CONSONANTS = {
+    "ক": "k",
+    "খ": "kh",
+    "গ": "g",
+    "ঘ": "gh",
+    "ঙ": "ng",
+    "চ": "ch",
+    "ছ": "ch",
+    "জ": "j",
+    "ঝ": "jh",
+    "ঞ": "n",
+    "ট": "t",
+    "ঠ": "th",
+    "ড": "d",
+    "ঢ": "dh",
+    "ণ": "n",
+    "ত": "t",
+    "থ": "th",
+    "দ": "d",
+    "ধ": "dh",
+    "ন": "n",
+    "প": "p",
+    "ফ": "f",
+    "ব": "b",
+    "ভ": "v",
+    "ম": "m",
+    "য": "j",
+    "র": "r",
+    "ল": "l",
+    "শ": "sh",
+    "ষ": "sh",
+    "স": "s",
+    "হ": "h",
+    "ড়": "r",
+    "ঢ়": "rh",
+    "য়": "y",
+    "ৎ": "t",
+}
+
+DIGITS = str.maketrans("০১২৩৪৫৬৭৮৯", "0123456789")
+VIRAMA = "্"
+NASAL_MARKS = {"ং": "ng", "ঁ": "n", "ঃ": "h"}
+PUNCTUATION = {"।": "."}
+
+
+def transliterate_bangla_to_banglish(text: str) -> str:
+    words = []
+    for word in text.translate(DIGITS).split(" "):
+        chars = list(word)
+        output: list[str] = []
+        index = 0
+        while index < len(chars):
+            char = chars[index]
+            next_char = chars[index + 1] if index + 1 < len(chars) else ""
+            after_next = chars[index + 2] if index + 2 < len(chars) else ""
+            if char in INDEPENDENT_VOWELS:
+                output.append(INDEPENDENT_VOWELS[char])
+            elif char in CONSONANTS:
+                output.append(CONSONANTS[char])
+                if next_char == VIRAMA:
+                    index += 1
+                elif next_char not in VOWEL_SIGNS and next_char not in NASAL_MARKS and after_next not in VOWEL_SIGNS:
+                    if index + 1 < len(chars):
+                        output.append("o")
+            elif char in VOWEL_SIGNS:
+                output.append(VOWEL_SIGNS[char])
+            elif char in NASAL_MARKS:
+                output.append(NASAL_MARKS[char])
+            else:
+                output.append(PUNCTUATION.get(char, char))
+            index += 1
+        words.append("".join(output))
+    return cleanup_text(" ".join(words))
+
+
+def apply_output_script(result: dict[str, Any], output_script: str) -> dict[str, Any]:
+    if output_script != "banglish":
+        return result
+    result["native_text"] = result.get("text", "")
+    result["text"] = transliterate_bangla_to_banglish(str(result.get("text", "")))
+    for segment in result.get("segments", []):
+        segment["native_text"] = segment.get("text", "")
+        segment["text"] = transliterate_bangla_to_banglish(str(segment.get("text", "")))
+    return result
+
+
+def postprocess_result(result: dict[str, Any], profile: str, repetition_guard: bool = True, output_script: str = "native") -> dict[str, Any]:
     warnings: list[str] = []
     segments = []
     suspicious_segments = 0
@@ -189,8 +303,10 @@ def postprocess_result(result: dict[str, Any], profile: str, repetition_guard: b
 
     result["segments"] = segments
     result["text"] = full_text
+    result = apply_output_script(result, output_script)
     result["quality"] = {
         "profile": profile,
+        "output_script": output_script,
         "language_probability": round(lang_prob, 4),
         "low_confidence": low_confidence,
         "repetition_score": round(full_ratio, 4),

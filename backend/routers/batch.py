@@ -67,6 +67,7 @@ async def create_batch_job(
     condition_on_previous_text: bool = Form(True),
     repetition_guard: bool = Form(True),
     hotwords: str = Form(""),
+    output_script: str = Form("native"),
 ):
     options = TranscriptionOptions(
         model_name=model_name,
@@ -81,6 +82,7 @@ async def create_batch_job(
         condition_on_previous_text=condition_on_previous_text,
         repetition_guard=repetition_guard,
         hotwords=hotwords or None,
+        output_script=output_script,
     )
     paths: list[Path] = []
     if files:

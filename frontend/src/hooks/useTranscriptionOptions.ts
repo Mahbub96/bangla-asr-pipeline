@@ -1,5 +1,10 @@
 import { useState } from "react";
 
+function clampNumber(value: number, min: number, max: number) {
+  if (Number.isNaN(value)) return min;
+  return Math.min(max, Math.max(min, value));
+}
+
 export function useTranscriptionOptions() {
   const [model, setModel] = useState("large-v3-turbo");
   const [language, setLanguage] = useState("auto");
@@ -13,6 +18,7 @@ export function useTranscriptionOptions() {
   const [conditionOnPreviousText, setConditionOnPreviousText] = useState(true);
   const [repetitionGuard, setRepetitionGuard] = useState(true);
   const [hotwords, setHotwords] = useState("");
+  const [outputScript, setOutputScript] = useState("native");
 
   function appendOptions(form: FormData) {
     form.append("model_name", model);
@@ -27,23 +33,39 @@ export function useTranscriptionOptions() {
     form.append("condition_on_previous_text", String(conditionOnPreviousText));
     form.append("repetition_guard", String(repetitionGuard));
     form.append("hotwords", hotwords);
+    form.append("output_script", outputScript);
   }
 
   return {
-    options: { model, language, beam, temperature, prompt, vad, profile, chunkLength, vadAggressiveness, conditionOnPreviousText, repetitionGuard, hotwords },
+    options: {
+      model,
+      language,
+      beam,
+      temperature,
+      prompt,
+      vad,
+      profile,
+      chunkLength,
+      vadAggressiveness,
+      conditionOnPreviousText,
+      repetitionGuard,
+      hotwords,
+      outputScript
+    },
     setters: {
       setModel,
       setLanguage,
-      setBeam,
-      setTemperature,
+      setBeam: (value: number) => setBeam(clampNumber(value, 1, 10)),
+      setTemperature: (value: number) => setTemperature(clampNumber(value, 0, 1)),
       setPrompt,
       setVad,
       setProfile,
-      setChunkLength,
+      setChunkLength: (value: number) => setChunkLength(clampNumber(value, 0, 120)),
       setVadAggressiveness,
       setConditionOnPreviousText,
       setRepetitionGuard,
-      setHotwords
+      setHotwords,
+      setOutputScript
     },
     appendOptions
   };

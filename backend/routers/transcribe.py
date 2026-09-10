@@ -3,6 +3,7 @@ import tempfile
 from pathlib import Path
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from pydantic import ValidationError
 
 from backend.schemas import TranscriptionOptions
 from backend.services.audio import sanitize_audio_input
@@ -36,7 +37,7 @@ def run_transcription(audio_path: Path, options: TranscriptionOptions) -> tuple[
         language=options.language,
         **quality.transcribe_kwargs,
     )
-    result = postprocess_result(result, quality.profile, options.repetition_guard)
+    result = postprocess_result(result, quality.profile, options.repetition_guard, options.output_script)
     exports = create_transcription_exports(result)
     return result, exports
 
@@ -67,6 +68,7 @@ async def transcribe_upload(
     condition_on_previous_text: bool = Form(True),
     repetition_guard: bool = Form(True),
     hotwords: str = Form(""),
+    output_script: str = Form("native"),
 ):
     try:
         options = TranscriptionOptions(
@@ -84,6 +86,7 @@ async def transcribe_upload(
             condition_on_previous_text=condition_on_previous_text,
             repetition_guard=repetition_guard,
             hotwords=hotwords or None,
+            output_script=output_script,
         )
         path = await save_upload(audio)
         result, exports = run_transcription(path, options)
@@ -103,5 +106,7 @@ async def transcribe_upload(
 
         job_registry._jobs["latest"] = transient_job
         return payload
+    except ValidationError as exc:
+        raise HTTPException(status_code=422, detail=exc.errors()) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc

@@ -18,6 +18,7 @@ class TranscriptionOptions(BaseModel):
     condition_on_previous_text: bool = True
     repetition_guard: bool = True
     hotwords: str | None = None
+    output_script: Literal["native", "banglish"] = "native"
 
 
 class DirectoryBatchRequest(TranscriptionOptions):

@@ -7,7 +7,7 @@ export function SegmentsTable({ rows }: { rows: Segment[] }) {
     <div className="table-wrap">
       <table>
         <thead>
-          <tr><th>Start</th><th>End</th><th>Risk</th><th>Text</th></tr>
+          <tr><th>Start</th><th>End</th><th>Risk</th><th>Text</th><th>Native</th></tr>
         </thead>
         <tbody>
           {rows.map((row, index) => (
@@ -16,6 +16,7 @@ export function SegmentsTable({ rows }: { rows: Segment[] }) {
               <td>{row.end}</td>
               <td>{row.suspicious ? "Review" : "OK"}</td>
               <td>{row.text}</td>
+              <td>{row.native_text ?? ""}</td>
             </tr>
           ))}
         </tbody>

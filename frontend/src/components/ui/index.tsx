@@ -7,6 +7,10 @@ export function Button({ className = "", ...props }: ButtonHTMLAttributes<HTMLBu
   return <button className={`btn ${className}`} {...props} />;
 }
 
+export function Spinner({ label = "Loading" }: { label?: string }) {
+  return <span className="spinner" role="status" aria-label={label} />;
+}
+
 export function Panel({ title, children, action }: { title: string; children: ReactNode; action?: ReactNode }) {
   return (
     <section className="panel">
@@ -24,6 +28,38 @@ export function Field({ label, children }: { label: string; children: ReactNode 
     <label className="field">
       <span>{label}</span>
       {children}
+    </label>
+  );
+}
+
+export function RangeField({
+  label,
+  value,
+  min,
+  max,
+  step = 1,
+  suffix = "",
+  onChange
+}: {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  step?: number;
+  suffix?: string;
+  onChange: (value: number) => void;
+}) {
+  return (
+    <label className="field range-field">
+      <span className="range-label">
+        {label}
+        <strong>{value}{suffix}</strong>
+      </span>
+      <input type="range" min={min} max={max} step={step} value={value} onChange={(event) => onChange(Number(event.target.value))} />
+      <span className="range-scale">
+        <small>{min}{suffix}</small>
+        <small>{max}{suffix}</small>
+      </span>
     </label>
   );
 }

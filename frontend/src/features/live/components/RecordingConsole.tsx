@@ -1,6 +1,6 @@
 import { Mic, Play, RefreshCw, Square, Trash2 } from "lucide-react";
 import type { MicState } from "../../../lib/media";
-import { Button } from "../../../components/ui";
+import { Button, Spinner } from "../../../components/ui";
 import { InputLevelMeter } from "./InputLevelMeter";
 import { RecordingStatus } from "./RecordingStatus";
 import { RecordingTimer } from "./RecordingTimer";
@@ -56,7 +56,7 @@ export function RecordingConsole({
           Check Mic
         </Button>
         <Button className="primary" onClick={onTranscribe} disabled={busy || !sourceReady || recording}>
-          <Play size={16} />
+          {busy ? <Spinner label="Transcribing audio" /> : <Play size={16} />}
           {busy ? "Transcribing" : "Transcribe Audio"}
         </Button>
         <Button onClick={onClear} disabled={recording}>

@@ -221,6 +221,12 @@
   color: #172033;
 }
 
+.transcribing-state .spinner {
+  width: 34px;
+  height: 34px;
+  color: #087a5d;
+}
+
 .transcript {
   width: 100%;
   min-height: 220px;
@@ -236,6 +242,22 @@
 
 .transcript.enhanced {
   min-height: 300px;
+}
+
+.native-text-disclosure {
+  margin-top: 12px;
+}
+
+.native-text-disclosure summary {
+  cursor: pointer;
+  color: #26364c;
+  font-weight: 800;
+}
+
+.transcript.native-backup {
+  min-height: 140px;
+  margin-top: 8px;
+  font-size: 0.95rem;
 }
 
 .quality-strip {
@@ -303,4 +325,8 @@
   color: #bfdbfe;
   line-height: 1.5;
   font-size: 0.86rem;
+}
+
+.debug-view {
+  min-height: 520px;
 }

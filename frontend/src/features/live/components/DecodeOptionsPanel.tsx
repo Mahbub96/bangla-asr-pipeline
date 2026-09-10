@@ -1,5 +1,5 @@
-import { ACCURACY_PROFILES, ASR_LANGUAGES, ASR_MODELS, VAD_AGGRESSIVENESS } from "../../../constants/asr";
-import { Field } from "../../../components/ui";
+import { ACCURACY_PROFILES, ASR_LANGUAGES, ASR_MODELS, OUTPUT_SCRIPTS, VAD_AGGRESSIVENESS } from "../../../constants/asr";
+import { Field, RangeField } from "../../../components/ui";
 import type { useTranscriptionOptions } from "../../../hooks/useTranscriptionOptions";
 
 type TranscriptionOptionsHook = ReturnType<typeof useTranscriptionOptions>;
@@ -24,20 +24,19 @@ export function DecodeOptionsPanel({ options, setters }: Pick<TranscriptionOptio
             {ACCURACY_PROFILES.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
           </select>
         </Field>
-        <Field label="Beam">
-          <input type="number" min={1} max={10} value={options.beam} onChange={(event) => setters.setBeam(Number(event.target.value))} />
+        <Field label="Output script">
+          <select value={options.outputScript} onChange={(event) => setters.setOutputScript(event.target.value)}>
+            {OUTPUT_SCRIPTS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+          </select>
         </Field>
-        <Field label="Chunk seconds">
-          <input type="number" min={0} max={120} value={options.chunkLength} onChange={(event) => setters.setChunkLength(Number(event.target.value))} />
-        </Field>
+        <RangeField label="Beam" min={1} max={10} value={options.beam} onChange={setters.setBeam} />
+        <RangeField label="Chunk seconds" min={0} max={120} step={5} suffix="s" value={options.chunkLength} onChange={setters.setChunkLength} />
         <Field label="VAD strength">
           <select value={options.vadAggressiveness} onChange={(event) => setters.setVadAggressiveness(event.target.value)}>
             {VAD_AGGRESSIVENESS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
           </select>
         </Field>
-        <Field label="Temperature">
-          <input type="number" min={0} max={1} step={0.1} value={options.temperature} onChange={(event) => setters.setTemperature(Number(event.target.value))} />
-        </Field>
+        <RangeField label="Temperature" min={0} max={1} step={0.1} value={options.temperature} onChange={setters.setTemperature} />
         <Field label="Context hints">
           <input value={options.prompt} onChange={(event) => setters.setPrompt(event.target.value)} placeholder="বাংলাদেশ, ঢাকা, ASR" />
         </Field>

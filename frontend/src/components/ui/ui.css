@@ -99,6 +99,21 @@
   color: white;
 }
 
+.spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 999px;
+  animation: spin 780ms linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .pill {
   display: inline-flex;
   align-items: center;
@@ -168,10 +183,42 @@
 
 .field input:focus,
 .field select:focus,
+.field input[type="range"]:focus,
 .panel > input:focus,
 .transcript:focus {
   outline: 3px solid #bde8d3;
   border-color: #0e9f6e;
+}
+
+.range-field {
+  align-content: start;
+}
+
+.range-label,
+.range-scale {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.range-label strong {
+  color: #087a5d;
+  font-size: 0.92rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.range-field input[type="range"] {
+  min-height: 38px;
+  padding: 0;
+  accent-color: #087a5d;
+  cursor: pointer;
+}
+
+.range-scale {
+  color: #6a798b;
+  font-size: 0.78rem;
+  font-weight: 700;
 }
 
 .check {
