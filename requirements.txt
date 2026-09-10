@@ -5,4 +5,7 @@ librosa
 jiwer
 pandas
 tqdm
-gradio
+fastapi
+uvicorn[standard]
+python-multipart
+pytest

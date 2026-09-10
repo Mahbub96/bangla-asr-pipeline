@@ -2,26 +2,27 @@
 
 An end-to-end Automatic Speech Recognition (ASR) studio and scalable fine-tuning pipeline tailored for **Bangla (বাংলা)** and **English** speech, powered by OpenAI's Whisper (`large-v3-turbo` / `large-v3`).
 
-Designed with a dual-workflow architecture:
-1. **Local Machine / Edge Inference:** Fast CPU-optimized testing, live streaming transcription, dataset preparation, and WER/CER evaluation via `faster-whisper` (CTranslate2 INT8).
-2. **GPU Training Cluster & GUI Studio:** Scalable fine-tuning pipeline exposing all 36+ Hugging Face `transformers`, `accelerate`, and Parameter-Efficient Fine-Tuning (`peft` / LoRA / QLoRA 4-bit) parameters directly through an interactive Gradio Web UI or CLI.
+Designed with a local-first full-stack architecture:
+1. **React Operator Studio:** A Vite + TypeScript frontend for microphone capture, file upload, batch jobs, benchmark runs, training logs, diagnostics, and exports.
+2. **FastAPI ASR Backend:** A modular API owns model caching, audio normalization, transcription, background jobs, SSE progress streams, export files, and training subprocess control.
+3. **CLI Compatibility:** Existing scripts remain available for direct inference, evaluation, data setup, model download, and remote GPU training.
 
 ---
 
 ## 🌟 Key Features & Highlights
 
-- **🎙️ Live Streaming Audio Studio**: Real-time microphone and file transcription with live chunk streaming, instant `🛑 Stop` button, and clipboard copy.
+- **🎙️ Browser Microphone Studio**: Reliable record-then-transcribe microphone capture with explicit browser permission states and file upload fallback.
 - **📄 Multi-Format Subtitle & Text Export**: One-click download in `.txt`, `.srt` (SubRip), `.vtt` (WebVTT), and `.json` formats with precise timestamps.
-- **📂 Batch Audio Transcription**: Drag-and-drop multiple audio files or process entire server directories concurrently with live streaming tables and CSV/JSON export.
-- **📊 Benchmark Suite**: Automated Word Error Rate (WER) and Character Error Rate (CER) calculation against ground-truth CSVs with error breakdown tables.
+- **📂 Batch Audio Transcription**: Multi-file upload or server-directory jobs with live status, logs, and CSV/JSON export.
+- **📊 Benchmark Suite**: Automated Word Error Rate (WER) and Character Error Rate (CER) jobs against ground-truth CSVs.
 - **🏋️ Batched Audio Training Studio (36+ Parameters)**:
   - Complete GUI exposing every Whisper training parameter (LoRA rank/alpha/dropout, target modules, QLoRA 4-bit, gradient checkpointing, mixed precision, LR schedulers, warmup, evaluation steps, beam search decoding).
   - **Dynamic Model-Adaptive Presets**: Changing the base model (`large-v3-turbo`, `large-v3`, `medium`, `small`, `base`, `tiny`) automatically tunes optimal batch sizes, gradient accumulation, precision, and LoRA ranks.
-  - **Live Subprocess Console**: Real-time terminal output streaming loss, WER/CER, and checkpoints with an instant `🛑 Abort Training` button.
+  - **Live Subprocess Console**: SSE terminal output streaming loss, WER/CER, and checkpoints with an instant abort button.
   - **Dataset Integrity Verifier**: Pre-flight validation of audio existence, sample rates, and transcripts.
   - **CLI Command Generator**: Generates equivalent copy-paste commands ready for remote headless cloud clusters (RunPod, Lambda Labs, AWS).
 - **🖥️ System Diagnostics**: Real-time GPU detection, CUDA VRAM monitor, and package dependency health checks.
-- **📱 Compact Single-Screen Layout (`100vh`)**: Optimized full display height dashboard with zero window-level scrolling, internal smooth scrolling, and sleek slim scrollbars.
+- **📱 Task-First React Layout**: Compact operator panels, responsive tables, clear progress states, and local workstation defaults.
 
 ---
 
@@ -29,9 +30,12 @@ Designed with a dual-workflow architecture:
 
 ```text
 Bangla ASR/
-├── app.py                   # Full Gradio 6 Web UI Studio (5 compact tabs)
-├── run_ui.sh                # Shell launcher for Web UI
-├── start.sh                 # Quick CLI test runner script
+├── backend/                 # FastAPI app, routers, and ASR service layer
+├── frontend/                # Vite React TypeScript operator UI
+├── start.sh                 # One-click launcher for frontend + backend
+├── run_ui.sh                # Launches React + FastAPI dev stack
+├── run_api.sh               # Launches FastAPI backend only
+├── run_cli_test.sh          # Quick CLI test runner script
 ├── data/
 │   ├── train/               # Training dataset
 │   │   ├── audio/           # Audio files (.wav, .mp3, .flac)
@@ -107,33 +111,30 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### 2. Launch the Interactive Web UI Studio
-Launch the browser-based dashboard:
+### 2. Launch the React + FastAPI Studio
+Launch the local browser dashboard:
 ```bash
-# Standard local launch (http://localhost:7860)
-./run_ui.sh
-
-# Cross-browser / Remote device launch with HTTPS for microphone access (https://0.0.0.0:7860)
-./run_ui.sh --ssl
-
-# Public HTTPS link via Gradio Share for remote testing
-./run_ui.sh --share
+./start.sh
 ```
-Then open **http://localhost:7860** (or **https://<your-ip>:7860** with `--ssl`) in your browser to access:
-- **🎯 Live Mic & Audio**: 
-  - **Direct Record & Transcribe**: Click the microphone icon to record speech and click stop to automatically stream the transcription live—no extra button clicks required.
-  - Cross-browser audio normalization converts WebM, OGG, and MP4/AAC streams directly to clean 16kHz WAV via FFmpeg.
+Then open **http://127.0.0.1:5173** in your browser.
+
+The backend API runs at **http://127.0.0.1:8000**. Microphone access works from `localhost` / `127.0.0.1`; do not open the app through `0.0.0.0`.
+
+Available sections:
+- **🎯 Live Mic & Audio**:
+  - Browser records audio with `MediaRecorder`, then sends the finished clip to FastAPI.
+  - Cross-browser audio normalization converts WebM, OGG, MP4/AAC, MP3, and WAV streams to clean 16kHz WAV via FFmpeg.
 - **📂 Batch Audio**: Folder or multi-file audio batch processing with live streaming tables.
 - **📊 Benchmark (WER / CER)**: Error rate calculation and dataset validation against ground truth.
 - **🏋️ Batched Training**: Full training hyperparameter suite (36+ parameters) with live console logs.
 - **🖥️ Diagnostics**: Hardware acceleration and environment health check.
 
-### 3. One-Click CLI Test Runner
+### 3. CLI Test Runner
 Run transcription directly across the test audio folder:
 ```bash
-./start.sh
+./run_cli_test.sh
 ```
-*(Optional arguments: `./start.sh <target_path> <model_name> <language>`)*
+*(Optional arguments: `./run_cli_test.sh <target_path> <model_name> <language>`)*
 
 ---
 

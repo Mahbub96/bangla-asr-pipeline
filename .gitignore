@@ -3,6 +3,7 @@ __pycache__/
 *.py[cod]
 *$py.class
 *.so
+.pytest_cache/
 
 # C extensions
 build/
@@ -48,6 +49,12 @@ batch_transcriptions.json
 *.log
 runs/
 events.out.tfevents.*
+.tmp/
+
+# React frontend dependencies and build output
+frontend/node_modules/
+frontend/dist/
+frontend/*.tsbuildinfo
 
 # OS and Editor specific
 .DS_Store

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Launch the Bangla & English ASR Gradio Web Interface
+# Launch the Bangla & English ASR React + FastAPI Studio
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
@@ -11,7 +11,22 @@ if [ ! -f "$PYTHON_EXEC" ]; then
     exit 1
 fi
 
-echo "Starting Bangla & English ASR Web UI Studio..."
-echo "Microphone access works on http://localhost:7860."
-echo "For another browser/device on your network, start with: ./run_ui.sh --ssl"
-"$PYTHON_EXEC" app.py --host 127.0.0.1 "$@"
+if [ ! -d "$SCRIPT_DIR/frontend/node_modules" ]; then
+    echo "Installing frontend dependencies..."
+    npm install --prefix "$SCRIPT_DIR/frontend"
+fi
+
+echo "Starting Bangla & English ASR Studio..."
+echo "Backend API : http://127.0.0.1:8000"
+echo "Frontend UI : http://127.0.0.1:5173"
+echo "Microphone access works from localhost / 127.0.0.1."
+
+"$PYTHON_EXEC" -m uvicorn backend.main:app --host 127.0.0.1 --port 8000 &
+BACKEND_PID=$!
+
+cleanup() {
+    kill "$BACKEND_PID" 2>/dev/null || true
+}
+trap cleanup EXIT
+
+npm run dev --prefix "$SCRIPT_DIR/frontend" -- "$@"
