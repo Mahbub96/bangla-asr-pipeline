@@ -2,17 +2,21 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   Activity,
   BarChart3,
+  Braces,
+  Clock,
   Cpu,
   Download,
   FileAudio,
   FolderOpen,
+  ListTree,
   Mic,
   Play,
   RefreshCw,
   Square,
   Terminal,
   Trash2,
-  Upload
+  Upload,
+  Waves
 } from "lucide-react";
 import { Button, Field, Panel, StatusPill } from "./components/ui";
 import { checkMicrophone, type MicState } from "./lib/media";
@@ -26,6 +30,7 @@ const languages = [
 ];
 
 type Tab = "live" | "batch" | "benchmark" | "training" | "diagnostics";
+type OutputView = "transcript" | "segments" | "raw";
 
 function App() {
   const [tab, setTab] = useState<Tab>("live");
@@ -117,35 +122,168 @@ function LiveTranscription() {
   const [micState, setMicState] = useState<MicState>("checking");
   const [file, setFile] = useState<File | null>(null);
   const [recorded, setRecorded] = useState<Blob | null>(null);
+  const [recordedUrl, setRecordedUrl] = useState("");
+  const [recordedDuration, setRecordedDuration] = useState(0);
+  const [recordingSeconds, setRecordingSeconds] = useState(0);
+  const [inputLevel, setInputLevel] = useState(0);
+  const [waveform, setWaveform] = useState<number[]>([]);
+  const [outputView, setOutputView] = useState<OutputView>("transcript");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [payload, setPayload] = useState<any>(null);
   const recorder = useRef<MediaRecorder | null>(null);
   const chunks = useRef<Blob[]>([]);
+  const streamRef = useRef<MediaStream | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const animationRef = useRef<number | null>(null);
+  const recordingStartedAt = useRef(0);
 
   useEffect(() => {
     checkMicrophone(false).then(setMicState);
-  }, []);
+    return () => {
+      stopMeter();
+      if (recordedUrl) URL.revokeObjectURL(recordedUrl);
+    };
+  }, [recordedUrl]);
+
+  function formatDuration(seconds: number) {
+    const mins = Math.floor(seconds / 60);
+    const secs = Math.floor(seconds % 60);
+    const tenths = Math.floor((seconds % 1) * 10);
+    return `${mins}:${secs.toString().padStart(2, "0")}.${tenths}`;
+  }
+
+  function stopMeter() {
+    if (animationRef.current) cancelAnimationFrame(animationRef.current);
+    animationRef.current = null;
+    audioContextRef.current?.close().catch(() => undefined);
+    audioContextRef.current = null;
+    streamRef.current?.getTracks().forEach((track) => track.stop());
+    streamRef.current = null;
+    setInputLevel(0);
+  }
+
+  function startMeter(stream: MediaStream) {
+    const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+    if (!AudioCtx) return;
+    const context = new AudioCtx();
+    const analyser = context.createAnalyser();
+    analyser.fftSize = 512;
+    context.createMediaStreamSource(stream).connect(analyser);
+    audioContextRef.current = context;
+    const data = new Uint8Array(analyser.fftSize);
+
+    const tick = () => {
+      analyser.getByteTimeDomainData(data);
+      let sum = 0;
+      for (const sample of data) {
+        const normalized = (sample - 128) / 128;
+        sum += normalized * normalized;
+      }
+      const rms = Math.sqrt(sum / data.length);
+      setInputLevel(Math.min(1, rms * 5));
+      setRecordingSeconds((performance.now() - recordingStartedAt.current) / 1000);
+      animationRef.current = requestAnimationFrame(tick);
+    };
+    tick();
+  }
+
+  async function buildWaveform(blob: Blob) {
+    const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+    if (!AudioCtx) return;
+    const context = new AudioCtx();
+    try {
+      const buffer = await context.decodeAudioData(await blob.arrayBuffer());
+      const channel = buffer.getChannelData(0);
+      const bars = 120;
+      const block = Math.max(1, Math.floor(channel.length / bars));
+      const nextWaveform = Array.from({ length: bars }, (_, index) => {
+        let peak = 0;
+        const start = index * block;
+        for (let i = start; i < Math.min(start + block, channel.length); i += 1) {
+          peak = Math.max(peak, Math.abs(channel[i]));
+        }
+        return Math.max(0.04, Math.min(1, peak));
+      });
+      setWaveform(nextWaveform);
+      setRecordedDuration(buffer.duration);
+    } finally {
+      await context.close();
+    }
+  }
+
+  function setRecordingBlob(blob: Blob) {
+    if (recordedUrl) URL.revokeObjectURL(recordedUrl);
+    const url = URL.createObjectURL(blob);
+    setRecorded(blob);
+    setRecordedUrl(url);
+    buildWaveform(blob).catch(() => setWaveform([]));
+  }
+
+  function resetLiveState() {
+    setFile(null);
+    setRecorded(null);
+    setRecordedDuration(0);
+    setRecordingSeconds(0);
+    setWaveform([]);
+    setPayload(null);
+    setError("");
+    setOutputView("transcript");
+    if (recordedUrl) {
+      URL.revokeObjectURL(recordedUrl);
+      setRecordedUrl("");
+    }
+  }
+
+  async function handleFile(fileValue: File | null) {
+    setFile(fileValue);
+    setPayload(null);
+    setOutputView("transcript");
+    if (!fileValue) return;
+    setRecorded(null);
+    setRecordedDuration(0);
+    setRecordedUrl("");
+    setWaveform([]);
+    if (fileValue.type.startsWith("audio/")) {
+      await buildWaveform(fileValue).catch(() => setWaveform([]));
+    }
+  }
 
   async function startRecording() {
     setError("");
+    setPayload(null);
+    setFile(null);
+    setRecorded(null);
+    setRecordedDuration(0);
+    setWaveform([]);
+    if (recordedUrl) {
+      URL.revokeObjectURL(recordedUrl);
+      setRecordedUrl("");
+    }
     const state = await checkMicrophone(true);
     if (state !== "ready") {
       setMicState(state);
       return;
     }
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    streamRef.current = stream;
     chunks.current = [];
+    recordingStartedAt.current = performance.now();
+    setRecordingSeconds(0);
     recorder.current = new MediaRecorder(stream);
     recorder.current.ondataavailable = (event) => {
       if (event.data.size > 0) chunks.current.push(event.data);
     };
     recorder.current.onstop = () => {
-      stream.getTracks().forEach((track) => track.stop());
-      setRecorded(new Blob(chunks.current, { type: "audio/webm" }));
+      const duration = (performance.now() - recordingStartedAt.current) / 1000;
+      const blob = new Blob(chunks.current, { type: "audio/webm" });
+      stopMeter();
+      setRecordedDuration(duration);
+      setRecordingBlob(blob);
       setMicState("stopped");
     };
     recorder.current.start();
+    startMeter(stream);
     setMicState("recording");
   }
 
@@ -158,6 +296,7 @@ function LiveTranscription() {
     if (!source) return setError("Record speech or choose an audio file first.");
     setBusy(true);
     setError("");
+    setOutputView("transcript");
     try {
       const form = new FormData();
       form.append("audio", source);
@@ -171,43 +310,145 @@ function LiveTranscription() {
   }
 
   const result = payload?.result;
+  const sourceReady = Boolean(recorded || file);
+  const activeDuration = micState === "recording" ? recordingSeconds : recordedDuration;
   return (
-    <div className="workspace two-col">
-      <Panel title="Record or Upload" action={<MicBadge state={micState} />}>
-        <div className="record-row">
-          <Button onClick={micState === "recording" ? stopRecording : startRecording} className={micState === "recording" ? "danger" : "primary"}>
-            {micState === "recording" ? <Square size={16} /> : <Mic size={16} />}
-            {micState === "recording" ? "Stop" : "Record"}
-          </Button>
-          <Button onClick={() => checkMicrophone(true).then(setMicState)}>
-            <RefreshCw size={16} />
-            Check Mic
-          </Button>
-          {recorded && <StatusPill tone="good">Recording ready</StatusPill>}
+    <div className="workspace live-grid">
+      <Panel title="Live Mic & Audio" action={<MicBadge state={micState} />}>
+        <div className={`recording-console ${micState === "recording" ? "is-recording" : ""}`}>
+          <div className="recording-primary">
+            <div className="recording-state">
+              <span className="recording-dot" />
+              <span>{micState === "recording" ? "Recording in progress" : sourceReady ? "Audio source ready" : "Waiting for audio"}</span>
+            </div>
+            <div className="recording-time">
+              <Clock size={18} />
+              {formatDuration(activeDuration)}
+            </div>
+          </div>
+
+          <div className="live-meter" aria-label="Live microphone input level">
+            {Array.from({ length: 24 }, (_, index) => {
+              const lit = index / 23 < inputLevel;
+              return <span key={index} className={lit ? "active" : ""} />;
+            })}
+          </div>
+
+          <Waveform bars={waveform} active={micState === "recording"} level={inputLevel} />
+
+          {recordedUrl && <audio className="audio-preview" src={recordedUrl} controls />}
+
+          <div className="recording-actions">
+            <Button onClick={micState === "recording" ? stopRecording : startRecording} className={micState === "recording" ? "danger" : "primary"}>
+              {micState === "recording" ? <Square size={16} /> : <Mic size={16} />}
+              {micState === "recording" ? "Stop Recording" : "Start Recording"}
+            </Button>
+            <Button onClick={() => checkMicrophone(true).then(setMicState)} disabled={micState === "recording"}>
+              <RefreshCw size={16} />
+              Check Mic
+            </Button>
+            <Button className="primary" onClick={submit} disabled={busy || !sourceReady || micState === "recording"}>
+              <Play size={16} />
+              {busy ? "Transcribing" : "Transcribe Audio"}
+            </Button>
+            <Button onClick={resetLiveState} disabled={micState === "recording"}>
+              <Trash2 size={16} />
+              Clear
+            </Button>
+          </div>
         </div>
-        <label className="upload-zone">
-          <Upload size={22} />
-          <span>{file ? file.name : "Drop or choose audio"}</span>
-          <input type="file" accept="audio/*" onChange={(event) => setFile(event.target.files?.[0] ?? null)} />
-        </label>
-        {controls}
-        <div className="actions">
-          <Button className="primary" onClick={submit} disabled={busy}>
-            <Play size={16} />
-            {busy ? "Transcribing" : "Transcribe"}
-          </Button>
-          <Button onClick={() => { setFile(null); setRecorded(null); setPayload(null); setError(""); }}>
-            <Trash2 size={16} />
-            Clear
-          </Button>
+
+        <div className="source-panel">
+          <label className="upload-zone compact-upload">
+            <Upload size={22} />
+            <span>{file ? file.name : "Choose an existing audio file"}</span>
+            <input type="file" accept="audio/*" onChange={(event) => handleFile(event.target.files?.[0] ?? null)} />
+          </label>
+          <div className="source-summary">
+            <Info label="Source" value={file ? "Uploaded file" : recorded ? "Microphone recording" : "No audio selected"} />
+            <Info label="Duration" value={sourceReady ? formatDuration(activeDuration) : "0:00.0"} />
+          </div>
         </div>
+
+        <details className="options-disclosure">
+          <summary>Model and decoding options</summary>
+          {controls}
+        </details>
         {error && <p className="error">{error}</p>}
       </Panel>
-      <Panel title="Transcribed Output" action={result && <ExportLinks exports={payload.exports} />}>
-        <textarea className="transcript" value={result?.text ?? ""} readOnly placeholder="Decoded Bangla or English text appears here." />
-        {result && <Metrics result={result} />}
-        <Segments rows={result?.segments ?? []} />
+
+      <Panel title="Backend Output" action={result && <ExportLinks exports={payload.exports} />}>
+        <div className="output-toolbar" role="tablist" aria-label="Transcription output views">
+          <button className={outputView === "transcript" ? "active" : ""} onClick={() => setOutputView("transcript")}>
+            <FileAudio size={16} />
+            Raw transcript
+          </button>
+          <button className={outputView === "segments" ? "active" : ""} onClick={() => setOutputView("segments")}>
+            <ListTree size={16} />
+            Time segments
+          </button>
+          <button className={outputView === "raw" ? "active" : ""} onClick={() => setOutputView("raw")}>
+            <Braces size={16} />
+            API JSON
+          </button>
+        </div>
+
+        {!result && (
+          <div className="structured-empty">
+            <Waves size={32} />
+            <strong>No backend result yet</strong>
+            <span>Record or upload audio, then transcribe to populate transcript, time segments, metadata, and export links.</span>
+          </div>
+        )}
+
+        {result && outputView === "transcript" && (
+          <>
+            <textarea className="transcript enhanced" value={result.text ?? ""} readOnly />
+            <Metrics result={result} />
+          </>
+        )}
+        {result && outputView === "segments" && <Segments rows={result.segments ?? []} />}
+        {result && outputView === "raw" && <pre className="json-view">{JSON.stringify(payload, null, 2)}</pre>}
       </Panel>
+    </div>
+  );
+}
+
+function Waveform({ bars, active, level }: { bars: number[]; active: boolean; level: number }) {
+  if (!active && bars.length === 0) {
+    return (
+      <div className="waveform empty-waveform" aria-label="No audio waveform loaded">
+        <div className="waveform-ruler">
+          <span>0:00</span>
+          <span>timeline</span>
+          <span>clip end</span>
+        </div>
+        <div className="waveform-placeholder">
+          <Waves size={28} />
+          <span>Waveform appears after recording or upload</span>
+        </div>
+      </div>
+    );
+  }
+  const displayBars = bars.length
+    ? bars
+    : Array.from({ length: 96 }, (_, index) => {
+        if (!active) return 0.08;
+        const phase = Math.sin(index * 0.55 + Date.now() / 130);
+        return Math.max(0.05, Math.min(1, level * (0.45 + Math.abs(phase) * 0.9)));
+      });
+  return (
+    <div className={`waveform ${active ? "live" : ""}`} aria-label={active ? "Live recording waveform" : "Recorded audio waveform"}>
+      <div className="waveform-ruler">
+        <span>0:00</span>
+        <span>timeline</span>
+        <span>clip end</span>
+      </div>
+      <div className="waveform-bars">
+        {displayBars.map((bar, index) => (
+          <span key={index} style={{ height: `${Math.max(8, bar * 92)}%` }} />
+        ))}
+      </div>
     </div>
   );
 }
