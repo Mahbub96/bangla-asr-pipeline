@@ -1,4 +1,5 @@
 # macOS AppleDouble/resource-fork sidecars break Docker build contexts on external volumes
+._*
 **/._*
 
 node_modules
