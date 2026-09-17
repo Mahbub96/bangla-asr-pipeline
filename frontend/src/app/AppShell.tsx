@@ -1,10 +1,11 @@
-import { BarChart3, Cpu, FolderOpen, Mic, Terminal } from "lucide-react";
+import { BarChart3, Cpu, FolderOpen, List, Mic, Terminal } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { StatusPill, Tabs } from "../components/ui";
 import { BatchTranscription } from "../features/batch/BatchTranscription";
 import { Benchmark } from "../features/benchmark/Benchmark";
 import { Diagnostics } from "../features/diagnostics/Diagnostics";
 import { LiveMicAudio } from "../features/live/LiveMicAudio";
+import { Logs } from "../features/logs/Logs";
 import { Training } from "../features/training/Training";
 import type { StudioTab } from "../types/asr";
 
@@ -13,6 +14,7 @@ const tabItems: Array<{ value: StudioTab; label: string; icon: ReactNode }> = [
   { value: "batch", label: "Batch", icon: <FolderOpen size={16} /> },
   { value: "benchmark", label: "Benchmark", icon: <BarChart3 size={16} /> },
   { value: "training", label: "Training", icon: <Terminal size={16} /> },
+  { value: "logs", label: "Logs", icon: <List size={16} /> },
   { value: "diagnostics", label: "Diagnostics", icon: <Cpu size={16} /> }
 ];
 
@@ -44,6 +46,7 @@ export function AppShell() {
       {tab === "batch" && <BatchTranscription />}
       {tab === "benchmark" && <Benchmark />}
       {tab === "training" && <Training />}
+      {tab === "logs" && <Logs />}
       {tab === "diagnostics" && <Diagnostics />}
     </main>
   );

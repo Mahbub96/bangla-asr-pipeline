@@ -9,8 +9,9 @@ from fastapi.staticfiles import StaticFiles
 from starlette.responses import FileResponse
 
 from backend.config import CORS_ORIGINS, FRONTEND_DIST, JOB_RETENTION_SECONDS
-from backend.routers import batch, diagnostics, evaluate, jobs, train, transcribe
+from backend.routers import batch, diagnostics, evaluate, jobs, logs, train, transcribe
 from backend.services.jobs import job_registry
+from backend.services.log_buffer import log_buffer
 from backend.services.storage import sweep_orphans
 
 logging.basicConfig(
@@ -18,6 +19,7 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
 )
 logger = logging.getLogger("asr")
+logging.getLogger().addHandler(log_buffer)
 
 JANITOR_INTERVAL_SECONDS = 900
 
@@ -79,6 +81,7 @@ app.include_router(evaluate.router)
 app.include_router(train.router)
 app.include_router(diagnostics.router)
 app.include_router(jobs.router)
+app.include_router(logs.router)
 
 
 @app.get("/api/health")

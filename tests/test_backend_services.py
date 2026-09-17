@@ -30,6 +30,24 @@ def test_job_snapshot_exposes_export_links():
     assert snapshot["status"] == "completed"
 
 
+def test_runtime_logs_endpoint_exposes_backend_logs():
+    client = TestClient(app)
+
+    response = client.get("/api/logs/runtime?limit=5")
+
+    assert response.status_code == 200
+    assert "logs" in response.json()
+
+
+def test_active_job_logs_endpoint_exposes_active_jobs():
+    client = TestClient(app)
+
+    response = client.get("/api/logs/jobs/active")
+
+    assert response.status_code == 200
+    assert "jobs" in response.json()
+
+
 def test_training_command_uses_lora_defaults():
     args = build_training_args({})
     command = relative_command(args)

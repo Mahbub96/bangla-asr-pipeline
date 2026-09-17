@@ -109,7 +109,14 @@ export type TrainingConfig = {
   precision: string;
 };
 
-export type StudioTab = "live" | "batch" | "benchmark" | "training" | "diagnostics";
+export type RuntimeLog = {
+  created: number;
+  level: string;
+  logger: string;
+  message: string;
+};
+
+export type StudioTab = "live" | "batch" | "benchmark" | "training" | "logs" | "diagnostics";
 export type OutputView = "transcript" | "segments" | "raw" | "debug";
 
 export type LiveDebugState = {

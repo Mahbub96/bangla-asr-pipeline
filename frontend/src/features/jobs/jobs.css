@@ -77,3 +77,18 @@ progress {
   padding: 6px;
   text-align: left;
 }
+
+.log-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  color: #536275;
+  font-size: 0.85rem;
+}
+
+.log-actions label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
