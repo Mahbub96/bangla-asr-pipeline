@@ -99,6 +99,24 @@ def test_single_backup_replaces_old_backup_and_stores_score(tmp_path):
     assert manifest["baseline_evaluation"]["metrics"]["mean_sample_wer"] == 0
 
 
+def test_backup_ignores_macos_sidecar_files(tmp_path):
+    source = tmp_path / "model"
+    source.mkdir()
+    (source / "weights.bin").write_bytes(b"model")
+    (source / "._weights.bin").write_bytes(b"appledouble")
+    nested = source / "snapshots"
+    nested.mkdir()
+    (nested / "config.json").write_text("{}", encoding="utf-8")
+    (nested / "._config.json").write_bytes(b"appledouble")
+
+    backup_dir = copy_backup(source, tmp_path / "backups", "current", hash_files=False, single=True)
+    manifest = json.loads((backup_dir / "backup_manifest.json").read_text(encoding="utf-8"))
+
+    assert not (backup_dir / "._weights.bin").exists()
+    assert not (backup_dir / "snapshots" / "._config.json").exists()
+    assert sorted(item["path"] for item in manifest["files"]) == ["snapshots/config.json", "weights.bin"]
+
+
 def test_model_comparison_writes_analysis_and_confusion_artifacts(tmp_path):
     old_csv = tmp_path / "old.csv"
     new_csv = tmp_path / "new.csv"

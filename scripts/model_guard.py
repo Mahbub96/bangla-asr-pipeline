@@ -21,6 +21,11 @@ from pathlib import Path
 from typing import Any
 
 
+def is_macos_sidecar(path: Path) -> bool:
+    """Return True for AppleDouble/resource-fork files created on macOS volumes."""
+    return any(part.startswith("._") for part in path.parts)
+
+
 def utc_stamp() -> str:
     return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
 
@@ -36,11 +41,24 @@ def sha256_file(path: Path, block_size: int = 1024 * 1024) -> str:
 def tree_manifest(path: Path, *, hash_files: bool = False) -> dict[str, Any]:
     files: list[dict[str, Any]] = []
     total_bytes = 0
-    for file_path in sorted(p for p in path.rglob("*") if p.is_file()):
-        stat = file_path.stat()
+    for file_path in sorted(path.rglob("*")):
+        relative_path = file_path.relative_to(path)
+        if is_macos_sidecar(relative_path):
+            continue
+        try:
+            if not file_path.is_file():
+                continue
+            stat = file_path.stat()
+        except OSError:
+            # External macOS volumes can expose unreadable AppleDouble xattr
+            # sidecars. They are not real model data, so do not let them abort
+            # backup manifest creation.
+            if is_macos_sidecar(relative_path):
+                continue
+            raise
         total_bytes += stat.st_size
         item: dict[str, Any] = {
-            "path": str(file_path.relative_to(path)),
+            "path": str(relative_path),
             "bytes": stat.st_size,
             "mtime": int(stat.st_mtime),
         }
@@ -74,7 +92,11 @@ def copy_backup(source: Path, destination_root: Path, name: str | None, hash_fil
                 existing.unlink()
     elif backup_dir.exists():
         raise FileExistsError(f"Backup destination already exists: {backup_dir}")
-    shutil.copytree(source, backup_dir)
+    shutil.copytree(
+        source,
+        backup_dir,
+        ignore=lambda _directory, names: [name for name in names if name.startswith("._")],
+    )
 
     manifest = tree_manifest(backup_dir, hash_files=hash_files)
     manifest.update(
