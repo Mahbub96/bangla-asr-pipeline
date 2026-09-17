@@ -81,12 +81,17 @@ export type TrainingConfig = {
   train_audio: string;
   val_csv: string;
   val_audio: string;
+  train_parquet: string;
+  val_parquet: string;
+  streaming_parquet: boolean;
+  dry_run_data: boolean;
   output_dir: string;
   batch_size: number;
   eval_batch_size: number;
   gradient_accumulation_steps: number;
   learning_rate: string;
   num_epochs: number;
+  max_steps: number;
   finetune_mode: string;
   precision: string;
 };

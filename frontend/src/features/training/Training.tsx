@@ -11,7 +11,7 @@ export function Training() {
   const { job, error, setError, attach, cancel } = useJobStream();
   const [config, setConfig] = useState<TrainingConfig>(DEFAULT_TRAINING_CONFIG);
 
-  function set(key: keyof TrainingConfig, value: string | number) {
+  function set(key: keyof TrainingConfig, value: string | number | boolean) {
     setConfig((current) => ({ ...current, [key]: value }));
   }
 
@@ -28,7 +28,11 @@ export function Training() {
       <div className="option-grid">
         {Object.entries(config).map(([key, value]) => (
           <Field key={key} label={key.replaceAll("_", " ")}>
-            <input value={value} onChange={(event) => set(key as keyof TrainingConfig, typeof value === "number" ? Number(event.target.value) : event.target.value)} />
+            {typeof value === "boolean" ? (
+              <input type="checkbox" checked={value} onChange={(event) => set(key as keyof TrainingConfig, event.target.checked)} />
+            ) : (
+              <input value={value} onChange={(event) => set(key as keyof TrainingConfig, typeof value === "number" ? Number(event.target.value) : event.target.value)} />
+            )}
           </Field>
         ))}
       </div>

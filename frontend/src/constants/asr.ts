@@ -39,12 +39,17 @@ export const DEFAULT_TRAINING_CONFIG: TrainingConfig = {
   train_audio: "data/train/audio",
   val_csv: "data/val/metadata.csv",
   val_audio: "data/val/audio",
+  train_parquet: "data/sources/subakko/hf/Data/train-*.parquet",
+  val_parquet: "data/sources/subakko/hf/Data/validation-*.parquet",
+  streaming_parquet: true,
+  dry_run_data: false,
   output_dir: "./checkpoints/whisper_bangla_lora",
   batch_size: 8,
   eval_batch_size: 8,
   gradient_accumulation_steps: 2,
   learning_rate: "1e-4",
   num_epochs: 5,
+  max_steps: 2000,
   finetune_mode: "lora",
   precision: "fp16"
 };

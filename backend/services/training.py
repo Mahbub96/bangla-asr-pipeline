@@ -73,6 +73,20 @@ def build_training_args(config: dict[str, Any]) -> list[str]:
         str(int(value("dataloader_num_workers", 2))),
     ]
 
+    train_parquet = str(value("train_parquet", "")).strip()
+    if train_parquet:
+        args.extend(["--train_parquet", train_parquet])
+
+    val_parquet = str(value("val_parquet", "")).strip()
+    if val_parquet:
+        args.extend(["--val_parquet", val_parquet])
+
+    if config.get("streaming_parquet", False):
+        args.append("--streaming_parquet")
+
+    if config.get("dry_run_data", False):
+        args.append("--dry_run_data")
+
     mode = str(value("finetune_mode", "lora")).lower()
     if "qlora" in mode or config.get("use_qlora"):
         args.append("--use_qlora")

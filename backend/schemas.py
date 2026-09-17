@@ -38,6 +38,10 @@ class TrainingRequest(BaseModel):
     train_audio: str = "data/train/audio"
     val_csv: str = "data/val/metadata.csv"
     val_audio: str = "data/val/audio"
+    train_parquet: str = "data/sources/subakko/hf/Data/train-*.parquet"
+    val_parquet: str = "data/sources/subakko/hf/Data/validation-*.parquet"
+    streaming_parquet: bool = True
+    dry_run_data: bool = False
     output_dir: str = "./checkpoints/whisper_bangla_lora"
     num_proc: int = 2
     finetune_mode: str = "lora"
@@ -60,7 +64,7 @@ class TrainingRequest(BaseModel):
     weight_decay: float = 0.01
     max_grad_norm: float = 1.0
     num_epochs: int = 5
-    max_steps: int = -1
+    max_steps: int = 2000
     eval_steps: int = 200
     save_steps: int = 200
     logging_steps: int = 25
