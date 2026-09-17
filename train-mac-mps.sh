@@ -40,10 +40,9 @@ echo "Follow: tail -f ${LOG_FILE}"
   --baseline_output checkpoints/baseline-old.csv \
   --after_output checkpoints/after-new.csv \
   --comparison_output checkpoints/model_comparison.json \
-  --eval_model_before large-v3-turbo \
-  --eval_engine_before faster-whisper \
+  --eval_model_before openai/whisper-large-v3-turbo \
+  --eval_engine_before transformers \
   --eval_engine_after transformers \
-  --eval_device cpu \
   --models_dir models \
   --eval_max_samples "${EVAL_MAX_SAMPLES}" \
   -- \

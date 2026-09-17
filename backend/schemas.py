@@ -50,9 +50,9 @@ class TrainingRequest(BaseModel):
     baseline_output: str = "checkpoints/baseline-old.csv"
     after_output: str = "checkpoints/after-new.csv"
     comparison_output: str = "checkpoints/model_comparison.json"
-    eval_model_before: str = "large-v3-turbo"
+    eval_model_before: str = "openai/whisper-large-v3-turbo"
     eval_model_after: str = ""
-    eval_engine_before: str = "faster-whisper"
+    eval_engine_before: str = "transformers"
     eval_engine_after: str = "transformers"
     eval_max_samples: int | None = 20
     output_dir: str = "./checkpoints/whisper_bangla_lora"

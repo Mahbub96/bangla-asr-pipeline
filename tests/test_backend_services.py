@@ -56,6 +56,8 @@ def test_training_command_uses_lora_defaults():
     assert "scripts/train_whisper.py" in command
     assert "--test_parquet data/sources/subakko/hf/Data/test-*.parquet" in command
     assert "--comparison_output checkpoints/model_comparison.json" in command
+    assert "--eval_model_before openai/whisper-large-v3-turbo" in command
+    assert "--eval_engine_before transformers" in command
     assert "--use_lora" in args
     assert "--lora_r" in args
     assert "--max_steps 10" in command
