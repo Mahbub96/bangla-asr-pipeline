@@ -21,7 +21,11 @@ def create_training_job(request: TrainingRequest):
     def work(job: Job) -> None:
         env = os.environ.copy()
         env["PYTHONUNBUFFERED"] = "1"
+        env.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
+        env.setdefault("HF_HOME", str(ROOT_DIR / "models"))
+        env.setdefault("HF_HUB_CACHE", str(ROOT_DIR / "models"))
         job.result = {"command": relative_command(args)}
+        job.append_log("Mac acceleration: PyTorch MPS enabled when available; CUDA is not required on Apple Silicon.")
         job.append_log(relative_command(args))
         job.process = subprocess.Popen(
             args,
