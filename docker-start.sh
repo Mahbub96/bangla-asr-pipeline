@@ -50,7 +50,7 @@ case "$MODE" in
 esac
 
 # Bind-mounted dirs must exist before compose creates them as root.
-mkdir -p models data
+mkdir -p models data checkpoints
 
 echo "============================================================"
 echo "     Bangla & English ASR Studio  —  Docker (${MODE})"

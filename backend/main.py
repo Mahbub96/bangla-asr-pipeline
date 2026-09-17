@@ -1,12 +1,63 @@
-from fastapi import FastAPI
+import asyncio
+import logging
+import os
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from starlette.responses import FileResponse
 
-from backend.config import CORS_ORIGINS, FRONTEND_DIST
+from backend.config import CORS_ORIGINS, FRONTEND_DIST, JOB_RETENTION_SECONDS
 from backend.routers import batch, diagnostics, evaluate, jobs, train, transcribe
+from backend.services.jobs import job_registry
+from backend.services.storage import sweep_orphans
 
-app = FastAPI(title="Bangla & English ASR Studio API", version="1.0.0")
+logging.basicConfig(
+    level=os.getenv("ASR_LOG_LEVEL", "INFO").upper(),
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+)
+logger = logging.getLogger("asr")
+
+JANITOR_INTERVAL_SECONDS = 900
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Background janitor: bounds job history and scratch-disk usage.
+
+    Without it a long-lived container accumulates finished jobs and their export
+    files indefinitely.
+    """
+
+    async def janitor() -> None:
+        while True:
+            try:
+                await asyncio.sleep(JANITOR_INTERVAL_SECONDS)
+                evicted = job_registry.prune()
+                # Grace period well past the retention window so files belonging
+                # to a live job are never swept out from under it.
+                swept = sweep_orphans(JOB_RETENTION_SECONDS + 3600)
+                if evicted or swept:
+                    logger.info("janitor: evicted %d job(s), removed %d orphan file(s)", evicted, swept)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception("janitor pass failed")
+
+    task = asyncio.create_task(janitor())
+    logger.info("ASR API ready (job retention %ds)", JOB_RETENTION_SECONDS)
+    try:
+        yield
+    finally:
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+
+app = FastAPI(title="Bangla & English ASR Studio API", version="1.0.0", lifespan=lifespan)
 
 # ASR_CORS_ORIGINS="*" (the container default) allows any origin. Credentials
 # cannot be combined with a wildcard origin list, so they are disabled in that
@@ -32,14 +83,18 @@ app.include_router(jobs.router)
 
 @app.get("/api/health")
 def health():
-    return {"ok": True}
+    return {"ok": True, "jobs": job_registry.stats()}
 
 
 if FRONTEND_DIST.exists():
-    app.mount("/assets", StaticFiles(directory=FRONTEND_DIST / "assets"), name="assets")
+    assets_dir = FRONTEND_DIST / "assets"
+    if assets_dir.is_dir():
+        app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
 
     @app.get("/{path:path}", include_in_schema=False)
-    def frontend(path: str = ""):
-        index = FRONTEND_DIST / "index.html"
-        return FileResponse(index)
-
+    def frontend(path: str):
+        # The SPA fallback must not swallow unknown API routes: returning
+        # index.html for /api/typo hides the error behind a 200 HTML page.
+        if path.startswith("api/"):
+            raise HTTPException(status_code=404, detail="Not found")
+        return FileResponse(FRONTEND_DIST / "index.html")

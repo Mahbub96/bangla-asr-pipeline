@@ -1,5 +1,4 @@
 import shutil
-import tempfile
 from collections import defaultdict
 from pathlib import Path
 
@@ -7,23 +6,26 @@ import jiwer
 import pandas as pd
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
-from backend.config import ROOT_DIR
+from backend.config import ROOT_DIR, resolve_within_allowed_roots
 from backend.routers.transcribe import run_transcription
 from backend.schemas import EvaluateRequest, JobResponse
 from backend.services.exports import create_table_exports
 from backend.services.jobs import Job, job_registry
+from backend.services.storage import UPLOAD_DIR, new_temp_path
 
 router = APIRouter(prefix="/api/evaluate", tags=["evaluate"])
 
 
 def evaluate_worker(request: EvaluateRequest, compare_profiles: bool = False):
     def work(job: Job) -> None:
-        csv_path = Path(request.metadata_csv_path)
-        audio_base = Path(request.audio_dir)
-        if not csv_path.is_absolute():
-            csv_path = ROOT_DIR / csv_path
-        if not audio_base.is_absolute():
-            audio_base = ROOT_DIR / audio_base
+        # An uploaded CSV lands in managed scratch space; a caller-supplied path
+        # must resolve inside the permitted data roots.
+        raw_csv = Path(request.metadata_csv_path)
+        if raw_csv.is_absolute() and raw_csv.parent == UPLOAD_DIR:
+            csv_path = raw_csv
+        else:
+            csv_path = resolve_within_allowed_roots(request.metadata_csv_path)
+        audio_base = resolve_within_allowed_roots(request.audio_dir)
         df = pd.read_csv(csv_path)
         audio_col = next((c for c in ["audio_path", "audio", "file_name", "filename", "path"] if c in df.columns), None)
         text_col = next((c for c in ["sentence", "transcription", "ground_truth", "text", "transcript"] if c in df.columns), None)
@@ -54,7 +56,7 @@ def evaluate_worker(request: EvaluateRequest, compare_profiles: bool = False):
             else:
                 profile_requests.append(request)
             for profile_request in profile_requests:
-                result, _ = run_transcription(audio_path, profile_request)
+                result, _ = run_transcription(audio_path, profile_request, create_exports=False)
                 hyp = result["text"].strip()
                 quality = result.get("quality", {})
                 rows.append(
@@ -119,11 +121,10 @@ async def create_evaluate_job(
     output_script: str = Form("native"),
 ):
     if csv_file:
-        target = tempfile.NamedTemporaryFile(suffix=".csv", delete=False)
-        target.close()
-        with open(target.name, "wb") as out:
+        target = new_temp_path(".csv")
+        with open(target, "wb") as out:
             shutil.copyfileobj(csv_file.file, out)
-        metadata_csv_path = target.name
+        metadata_csv_path = str(target)
     request = EvaluateRequest(
         metadata_csv_path=metadata_csv_path,
         audio_dir=audio_dir,
@@ -143,5 +144,12 @@ async def create_evaluate_job(
     )
     if not Path(request.metadata_csv_path).is_absolute() and not (ROOT_DIR / request.metadata_csv_path).is_file():
         raise HTTPException(status_code=400, detail=f"CSV not found: {request.metadata_csv_path}")
+    try:
+        # Fail fast on a forbidden path instead of surfacing it as a job error.
+        if Path(request.metadata_csv_path).parent != UPLOAD_DIR:
+            resolve_within_allowed_roots(request.metadata_csv_path)
+        resolve_within_allowed_roots(request.audio_dir)
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
     job = job_registry.create("evaluate", evaluate_worker(request, compare_profiles))
     return JobResponse(job_id=job.id, status_url=f"/api/jobs/{job.id}", events_url=f"/api/jobs/{job.id}/events")

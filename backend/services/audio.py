@@ -3,9 +3,15 @@ import subprocess
 import tempfile
 from pathlib import Path
 
+from backend.services.storage import UPLOAD_DIR
+
 
 def sanitize_audio_input(audio_path: str | Path) -> Path:
-    """Convert browser/container audio to a clean 16kHz mono WAV when ffmpeg is available."""
+    """Convert browser/container audio to a clean 16kHz mono WAV when ffmpeg is available.
+
+    Returns the source path unchanged when no conversion happened, so callers can
+    tell whether a new temporary file was created (see ``sanitized_is_temporary``).
+    """
     source = Path(audio_path)
     if not source.is_file():
         raise FileNotFoundError(f"Audio file not found: {source}")
@@ -13,7 +19,7 @@ def sanitize_audio_input(audio_path: str | Path) -> Path:
     if not shutil.which("ffmpeg"):
         return source
 
-    target = tempfile.NamedTemporaryFile(suffix="_clean.wav", delete=False)
+    target = tempfile.NamedTemporaryFile(suffix="_clean.wav", dir=UPLOAD_DIR, delete=False)
     target.close()
     target_path = Path(target.name)
     cmd = [

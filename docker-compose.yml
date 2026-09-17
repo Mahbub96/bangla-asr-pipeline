@@ -1,7 +1,7 @@
 # ---------------------------------------------------------------------------
 # Bangla & English ASR Studio — production stack (CPU by default)
 #
-#   docker compose up --build          ->  UI http://localhost:8080
+#   docker compose up -d --build       ->  UI http://localhost:8080
 #                                          API http://localhost:8000
 #
 # Runs anywhere Docker runs: Linux, macOS (Intel + Apple Silicon), Windows.
@@ -11,6 +11,14 @@
 #   GPU  : docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
 #   DEV  : docker compose -f docker-compose.yml -f docker-compose.dev.yml up
 # ---------------------------------------------------------------------------
+
+# Bounded JSON logs — the default driver grows without limit and is a common
+# cause of a full disk on long-lived deployments.
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
 
 services:
   backend:
@@ -24,10 +32,18 @@ services:
     image: bangla-asr-backend:latest
     container_name: bangla-asr-backend
     restart: unless-stopped
+    init: true
+    stop_grace_period: 30s
+    logging: *default-logging
     environment:
       ASR_HOST: 0.0.0.0
       ASR_PORT: 8000
       ASR_CORS_ORIGINS: ${ASR_CORS_ORIGINS:-*}
+      ASR_LOG_LEVEL: ${ASR_LOG_LEVEL:-INFO}
+      ASR_JOB_RETENTION_SECONDS: ${ASR_JOB_RETENTION_SECONDS:-21600}
+      ASR_JOB_HISTORY_LIMIT: ${ASR_JOB_HISTORY_LIMIT:-200}
+      ASR_MAX_UPLOAD_BYTES: ${ASR_MAX_UPLOAD_BYTES:-536870912}
+      ASR_MAX_BATCH_FILES: ${ASR_MAX_BATCH_FILES:-200}
       HF_HOME: /app/models
       HF_HUB_CACHE: /app/models
       OMP_NUM_THREADS: ${OMP_NUM_THREADS:-4}
@@ -35,11 +51,19 @@ services:
       # Model weights and datasets live on the host — images stay small and the
       # multi-GB Whisper download survives image rebuilds.
       - ./models:/app/models
-      - ./data:/app/data
+      # Datasets are read-only by default: the API only ever reads them. Set
+      # DATA_MOUNT_MODE=rw when running dataset-preparation jobs in-container.
+      - ./data:/app/data:${DATA_MOUNT_MODE:-ro}
+      - ./checkpoints:/app/checkpoints
       - asr-tmp:/app/.tmp
     ports:
       - "${BACKEND_PORT:-8000}:8000"
     networks: [asr]
+    deploy:
+      resources:
+        limits:
+          # Whisper large-v3-turbo needs headroom; raise on a bigger host.
+          memory: ${BACKEND_MEMORY_LIMIT:-8g}
 
   frontend:
     build:
@@ -52,6 +76,8 @@ services:
     image: bangla-asr-frontend:latest
     container_name: bangla-asr-frontend
     restart: unless-stopped
+    init: true
+    logging: *default-logging
     depends_on:
       backend:
         condition: service_healthy

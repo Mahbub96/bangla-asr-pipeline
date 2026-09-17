@@ -152,6 +152,27 @@ docker compose logs -f backend          # follow backend logs
 docker compose exec backend python -c "import torch; print(torch.__version__)"
 ```
 
+### Production hardening
+
+The container image is not just a dev convenience — the API enforces real limits:
+
+| Concern            | Behaviour                                                                    | Tunable                              |
+| ------------------ | ---------------------------------------------------------------------------- | ------------------------------------ |
+| Path traversal     | `batch`/`evaluate` paths must resolve inside `./data`; anything else is `403` | `ASR_EXTRA_DATA_ROOTS`               |
+| Job growth         | Finished jobs + their exports are evicted by age and count                    | `ASR_JOB_RETENTION_SECONDS`, `ASR_JOB_HISTORY_LIMIT` |
+| Scratch disk       | Uploads/exports live in a managed volume, deleted per request; hourly sweeper | mounted at `/app/.tmp`               |
+| Upload size        | Streamed with a hard cap, `413` beyond it                                     | `ASR_MAX_UPLOAD_BYTES`, `ASR_MAX_BATCH_FILES` |
+| Container logs     | JSON driver capped at 3 × 10 MB                                               | `docker-compose.yml`                 |
+| Memory             | Backend limited (default 8 GB)                                                | `BACKEND_MEMORY_LIMIT`               |
+| Datasets           | Mounted read-only by default                                                  | `DATA_MOUNT_MODE=rw`                 |
+| Headers            | `nosniff`, `SAMEORIGIN`, `Referrer-Policy`, `Permissions-Policy`              | `frontend/nginx.conf.template`       |
+
+`GET /api/health` returns live job counts and the active retention settings.
+
+The API has **no authentication** — it is designed to sit on a trusted network
+or behind an authenticating reverse proxy. Do not expose port 8000 or 8080
+directly to the internet.
+
 ### Microphone access
 
 Browsers only expose `getUserMedia` on `localhost` or HTTPS. Opening the UI via

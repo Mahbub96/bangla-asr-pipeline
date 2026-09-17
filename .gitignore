@@ -28,6 +28,11 @@ venv/
 ENV/
 env/
 
+# Local environment / secrets — never commit
+.env
+.env.*
+!.env.example
+
 # Pre-trained models and checkpoints (DO NOT COMMIT)
 models/
 checkpoints/

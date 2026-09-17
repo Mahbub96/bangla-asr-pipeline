@@ -111,11 +111,11 @@ def test_evaluate_request_accepts_accuracy_options():
 def test_transcribe_endpoint_accepts_accuracy_fields(monkeypatch, tmp_path):
     captured = {}
 
-    def fake_run_transcription(audio_path, options):
+    def fake_run_transcription(audio_path, options, create_exports=True, display_name=None):
         captured["options"] = options
         return (
             {
-                "file": str(audio_path),
+                "file": display_name or str(audio_path),
                 "duration_sec": 1,
                 "transcription_time_sec": 1,
                 "speed_factor": 1,

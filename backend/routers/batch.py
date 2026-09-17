@@ -2,51 +2,93 @@ from pathlib import Path
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
-from backend.config import ROOT_DIR
+from backend.config import MAX_BATCH_FILES, resolve_within_allowed_roots
 from backend.routers.transcribe import run_transcription, save_upload
 from backend.schemas import DirectoryBatchRequest, JobResponse, TranscriptionOptions
 from backend.services.audio import allowed_audio_path
 from backend.services.exports import create_table_exports
 from backend.services.jobs import Job, job_registry
+from backend.services.storage import discard
 
 router = APIRouter(prefix="/api/batch", tags=["batch"])
 
 
-def batch_worker(paths: list[Path], options: TranscriptionOptions):
+def _resolve_directory(raw: str) -> Path:
+    """Resolve a caller-supplied directory, refusing paths outside the data roots."""
+    try:
+        directory = resolve_within_allowed_roots(raw)
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    if not directory.is_dir():
+        raise HTTPException(status_code=400, detail=f"Directory not found: {raw}")
+    return directory
+
+
+def _collect_audio(directory: Path) -> list[Path]:
+    paths = [path for path in sorted(directory.rglob("*")) if path.is_file() and allowed_audio_path(path)]
+    if not paths:
+        raise HTTPException(status_code=400, detail="No audio files found")
+    if len(paths) > MAX_BATCH_FILES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Batch of {len(paths)} files exceeds the limit of {MAX_BATCH_FILES}",
+        )
+    return paths
+
+
+def batch_worker(
+    paths: list[Path],
+    options: TranscriptionOptions,
+    cleanup: bool = False,
+    display_names: dict[Path, str] | None = None,
+):
+    """cleanup=True when `paths` are uploaded temp files this job owns."""
+    names = display_names or {}
+
     def work(job: Job) -> None:
         rows = []
-        for index, path in enumerate(paths, 1):
-            if job.cancel_requested:
-                job.status = "cancelled"
-                job.message = "Cancelled"
-                return
-            job.message = f"Processing {path.name}"
-            job.progress = (index - 1) / max(1, len(paths))
-            job.emit()
-            try:
-                result, _ = run_transcription(path, options)
-                quality = result.get("quality", {})
-                rows.append(
-                    {
-                        "file": path.name,
-                        "language": result["language"],
-                        "confidence": result["language_probability"],
-                        "profile": quality.get("profile", options.profile),
-                        "repetition_score": quality.get("repetition_score"),
-                        "warnings": " | ".join(quality.get("warnings", [])),
-                        "duration_sec": result["duration_sec"],
-                        "speed_factor": result["speed_factor"],
-                        "text": result["text"],
-                    }
-                )
-                job.append_log(f"{index}/{len(paths)} {path.name}: {result['text'][:120]}")
-            except Exception as exc:
-                rows.append({"file": path.name, "language": "Error", "text": str(exc)})
-                job.append_log(f"{index}/{len(paths)} {path.name}: ERROR {exc}")
-            job.result = rows
-            job.progress = index / max(1, len(paths))
-            job.exports = create_table_exports(rows, "batch")
-            job.emit()
+        try:
+            for index, path in enumerate(paths, 1):
+                label = names.get(path, path.name)
+                if job.cancel_requested:
+                    job.status = "cancelled"
+                    job.message = "Cancelled"
+                    return
+                job.message = f"Processing {label}"
+                job.progress = (index - 1) / max(1, len(paths))
+                job.emit()
+                try:
+                    result, _ = run_transcription(
+                        path, options, create_exports=False, display_name=label
+                    )
+                    quality = result.get("quality", {})
+                    rows.append(
+                        {
+                            "file": label,
+                            "language": result["language"],
+                            "confidence": result["language_probability"],
+                            "profile": quality.get("profile", options.profile),
+                            "repetition_score": quality.get("repetition_score"),
+                            "warnings": " | ".join(quality.get("warnings", [])),
+                            "duration_sec": result["duration_sec"],
+                            "speed_factor": result["speed_factor"],
+                            "text": result["text"],
+                        }
+                    )
+                    job.append_log(f"{index}/{len(paths)} {label}: {result['text'][:120]}")
+                except Exception as exc:
+                    rows.append({"file": label, "language": "Error", "text": str(exc)})
+                    job.append_log(f"{index}/{len(paths)} {label}: ERROR {exc}")
+                job.result = rows
+                job.progress = index / max(1, len(paths))
+                # Replace the previous export pair rather than orphaning it.
+                stale = job.exports
+                job.exports = create_table_exports(rows, "batch")
+                discard(*stale.values())
+                job.emit()
+        finally:
+            if cleanup:
+                discard(*paths)
 
     return work
 
@@ -85,35 +127,41 @@ async def create_batch_job(
         output_script=output_script,
     )
     paths: list[Path] = []
+    display_names: dict[Path, str] = {}
+    uploaded = False
     if files:
-        for file in files:
-            uploaded = await save_upload(file)
-            if allowed_audio_path(uploaded):
-                paths.append(uploaded)
+        if len(files) > MAX_BATCH_FILES:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Batch of {len(files)} files exceeds the limit of {MAX_BATCH_FILES}",
+            )
+        uploaded = True
+        try:
+            for file in files:
+                saved = await save_upload(file)
+                if allowed_audio_path(saved):
+                    paths.append(saved)
+                    # Report the client's filename, not the scratch name.
+                    display_names[saved] = Path(file.filename or saved.name).name
+                else:
+                    discard(saved)
+        except Exception:
+            discard(*paths)
+            raise
     elif directory_path:
-        directory = Path(directory_path)
-        if not directory.is_absolute():
-            directory = ROOT_DIR / directory
-        if not directory.is_dir():
-            raise HTTPException(status_code=400, detail=f"Directory not found: {directory_path}")
-        paths = [path for path in sorted(directory.rglob("*")) if path.is_file() and allowed_audio_path(path)]
+        paths = _collect_audio(_resolve_directory(directory_path))
 
     if not paths:
         raise HTTPException(status_code=400, detail="No audio files found")
 
-    job = job_registry.create("batch", batch_worker(paths, options))
+    job = job_registry.create(
+        "batch", batch_worker(paths, options, cleanup=uploaded, display_names=display_names)
+    )
     return JobResponse(job_id=job.id, status_url=f"/api/jobs/{job.id}", events_url=f"/api/jobs/{job.id}/events")
 
 
 @router.post("/directory/jobs", response_model=JobResponse)
 def create_directory_batch_job(request: DirectoryBatchRequest):
-    directory = Path(request.directory_path)
-    if not directory.is_absolute():
-        directory = ROOT_DIR / directory
-    if not directory.is_dir():
-        raise HTTPException(status_code=400, detail=f"Directory not found: {request.directory_path}")
-    paths = [path for path in sorted(directory.rglob("*")) if path.is_file() and allowed_audio_path(path)]
-    if not paths:
-        raise HTTPException(status_code=400, detail="No audio files found")
+    paths = _collect_audio(_resolve_directory(request.directory_path))
     job = job_registry.create("batch", batch_worker(paths, request))
     return JobResponse(job_id=job.id, status_url=f"/api/jobs/{job.id}", events_url=f"/api/jobs/{job.id}/events")

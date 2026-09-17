@@ -1,9 +1,10 @@
 import json
-import tempfile
 from pathlib import Path
 from typing import Any
 
 import pandas as pd
+
+from backend.services.storage import EXPORT_DIR, write_temp_text
 
 
 def format_timestamp(seconds: float, sep: str) -> str:
@@ -35,10 +36,8 @@ def generate_vtt(segments: list[dict[str, Any]]) -> str:
 
 
 def write_temp_export(content: str, suffix: str) -> Path:
-    target = tempfile.NamedTemporaryFile(suffix=suffix, delete=False, mode="w", encoding="utf-8")
-    target.write(content)
-    target.close()
-    return Path(target.name)
+    """Exports live in the managed scratch dir and are reaped with their job."""
+    return write_temp_text(content, suffix, EXPORT_DIR)
 
 
 def create_transcription_exports(result: dict[str, Any]) -> dict[str, Path]:
