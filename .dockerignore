@@ -1,45 +1,19 @@
-# Git / CI
+# macOS AppleDouble/resource-fork sidecars break Docker build contexts on external volumes
+**/._*
+
+# Local/generated files not needed in images
 .git
-.gitignore
-.github
-
-# Python
-__pycache__/
-*.py[cod]
-.pytest_cache/
-.venv/
-venv/
-ENV/
-env/
-*.egg-info/
-
-# Large artefacts — mounted as volumes at runtime instead of baked into the image
-models/
-checkpoints/
-output_*/
-data/
-runs/
-*.pt
-*.pth
-*.bin
-*.safetensors
-*.onnx
-
-# Frontend (built in its own image/stage)
-frontend/node_modules/
-frontend/dist/
+.venv
+__pycache__
+.pytest_cache
+frontend/node_modules
+frontend/dist
 frontend/*.tsbuildinfo
-
-# Local state
-.tmp/
-.ssl/
+models
+checkpoints
+backups
+reports
+data/sources
+data/processed
+data/manifests
 *.log
-evaluation_results.csv
-test_transcriptions.json
-batch_transcriptions.json
-
-# Editors / OS
-.vscode/
-.idea/
-.DS_Store
-Thumbs.db
