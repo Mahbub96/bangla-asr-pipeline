@@ -5,8 +5,10 @@ Calculates Word Error Rate (WER) and Character Error Rate (CER) against ground t
 """
 
 import argparse
+import glob
 import os
 import sys
+import tempfile
 import pandas as pd
 from pathlib import Path
 from tqdm import tqdm
@@ -24,6 +26,47 @@ def compute_metrics(ground_truth_list, hypothesis_list):
     wer = jiwer.wer(ground_truth_list, hypothesis_list)
     cer = jiwer.cer(ground_truth_list, hypothesis_list)
     return wer, cer
+
+def resolve_parquet_files(patterns: str) -> list[str]:
+    files: list[str] = []
+    for pattern in [item.strip() for item in patterns.split(",") if item.strip()]:
+        matches = sorted(glob.glob(pattern))
+        if matches:
+            files.extend(matches)
+        elif Path(pattern).is_file():
+            files.append(pattern)
+    deduped = list(dict.fromkeys(files))
+    if not deduped:
+        raise FileNotFoundError(f"No parquet files matched: {patterns}")
+    return deduped
+
+def iter_parquet_rows(parquet_patterns: str, max_samples: int | None = None):
+    """Yield rows from ASR parquet shards containing audio.bytes + transcription."""
+    try:
+        import pyarrow.parquet as pq
+    except ImportError as exc:
+        raise RuntimeError("pyarrow is required for --parquet evaluation. Install requirements_gpu.txt.") from exc
+
+    emitted = 0
+    for parquet_path in resolve_parquet_files(parquet_patterns):
+        pf = pq.ParquetFile(parquet_path)
+        for batch in pf.iter_batches(batch_size=64):
+            for row in batch.to_pylist():
+                audio = row.get("audio") or {}
+                audio_bytes = audio.get("bytes") if isinstance(audio, dict) else None
+                ref_text = next((row.get(c) for c in ["sentence", "transcription", "ground_truth", "text", "transcript"] if row.get(c)), None)
+                if not audio_bytes or not ref_text:
+                    continue
+                name = Path(audio.get("path") or row.get("file_path") or f"sample_{emitted:08d}.wav").name
+                yield {
+                    "audio_bytes": audio_bytes,
+                    "audio_file": name,
+                    "ground_truth": str(ref_text).strip(),
+                    "source_path": str(parquet_path),
+                }
+                emitted += 1
+                if max_samples and emitted >= max_samples:
+                    return
 
 def evaluate_dataset(metadata_csv, audio_dir, model_name="large-v3-turbo", language="bn", device=None, compute_type=None, models_dir="models", output_csv="evaluation_results.csv"):
     metadata_path = Path(metadata_csv)
@@ -120,26 +163,94 @@ def evaluate_dataset(metadata_csv, audio_dir, model_name="large-v3-turbo", langu
     results_df.to_csv(out_p, index=False, encoding="utf-8")
     print(f"\nDetailed predictions and sample-level errors saved to: {out_p.resolve()}")
 
+def evaluate_parquet_dataset(parquet_patterns, model_name="large-v3-turbo", language="bn", device=None, compute_type=None, models_dir="models", output_csv="evaluation_results.csv", max_samples=None):
+    rows_iter = iter_parquet_rows(parquet_patterns, max_samples=max_samples)
+    model = get_transcriber(
+        model_size=model_name,
+        device=device,
+        compute_type=compute_type,
+        download_root=models_dir
+    )
+
+    results = []
+    with tempfile.TemporaryDirectory(prefix="asr_parquet_eval_") as tmpdir:
+        tmpdir_path = Path(tmpdir)
+        for index, row in enumerate(tqdm(rows_iter, desc="Evaluating parquet"), 1):
+            audio_path = tmpdir_path / row["audio_file"]
+            audio_path.write_bytes(row["audio_bytes"])
+            ref_text = row["ground_truth"]
+            try:
+                pred = transcribe_file(model, audio_path, language=language)
+                hyp_text = pred["text"].strip()
+                results.append({
+                    "audio_file": row["audio_file"],
+                    "source_path": row["source_path"],
+                    "duration_sec": pred["duration_sec"],
+                    "ground_truth": ref_text,
+                    "prediction": hyp_text,
+                    "detected_language": pred["language"],
+                    "wer": round(jiwer.wer(ref_text, hyp_text) if ref_text else 1.0, 4),
+                    "cer": round(jiwer.cer(ref_text, hyp_text) if ref_text else 1.0, 4),
+                })
+            except Exception as e:
+                print(f"Error evaluating {row['audio_file']}: {e}")
+            finally:
+                audio_path.unlink(missing_ok=True)
+
+    if not results:
+        print("No samples were successfully evaluated.")
+        return
+
+    results_df = pd.DataFrame(results)
+    overall_wer, overall_cer = compute_metrics(results_df["ground_truth"].tolist(), results_df["prediction"].tolist())
+    print("\n" + "=" * 50)
+    print("              PARQUET EVALUATION RESULTS          ")
+    print("=" * 50)
+    print(f"Total Samples Evaluated: {len(results_df)}")
+    print(f"Overall Word Error Rate (WER)     : {overall_wer:.2%}")
+    print(f"Overall Character Error Rate (CER): {overall_cer:.2%}")
+    print("=" * 50)
+
+    out_p = Path(output_csv)
+    results_df.to_csv(out_p, index=False, encoding="utf-8")
+    print(f"\nDetailed predictions and sample-level errors saved to: {out_p.resolve()}")
+
 def main():
     parser = argparse.ArgumentParser(description="Evaluate Whisper on test/validation dataset.")
     parser.add_argument("--metadata", default="data/test/metadata.csv", help="Path to metadata CSV file.")
     parser.add_argument("--audio_dir", default="data/test/audio", help="Path to directory containing audio files.")
+    parser.add_argument("--parquet", default=None, help="Comma-separated parquet files/globs with embedded audio bytes. Avoids permanent WAV extraction.")
+    parser.add_argument("--max_samples", type=int, default=None, help="Optional cap for quick parquet evaluation smoke tests.")
     parser.add_argument("--model", default="large-v3-turbo", help="Whisper model (large-v3-turbo, large-v3, medium, etc.)")
     parser.add_argument("--language", default="bn", choices=["bn", "en", "auto"], help="Language code (default: 'bn' for Bangla).")
     parser.add_argument("--device", default=None, help="Device: 'cpu' or 'cuda'.")
+    parser.add_argument("--compute_type", default=None, help="Quantization type, e.g. int8, float32, float16.")
     parser.add_argument("--models_dir", default="models", help="Directory where model weights are stored.")
     parser.add_argument("--output", default="evaluation_results.csv", help="Output CSV path for results.")
 
     args = parser.parse_args()
-    evaluate_dataset(
-        metadata_csv=args.metadata,
-        audio_dir=args.audio_dir,
-        model_name=args.model,
-        language=args.language,
-        device=args.device,
-        models_dir=args.models_dir,
-        output_csv=args.output
-    )
+    if args.parquet:
+        evaluate_parquet_dataset(
+            parquet_patterns=args.parquet,
+            model_name=args.model,
+            language=args.language,
+            device=args.device,
+            compute_type=args.compute_type,
+            models_dir=args.models_dir,
+            output_csv=args.output,
+            max_samples=args.max_samples,
+        )
+    else:
+        evaluate_dataset(
+            metadata_csv=args.metadata,
+            audio_dir=args.audio_dir,
+            model_name=args.model,
+            language=args.language,
+            device=args.device,
+            compute_type=args.compute_type,
+            models_dir=args.models_dir,
+            output_csv=args.output
+        )
 
 if __name__ == "__main__":
     main()

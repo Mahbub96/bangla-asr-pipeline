@@ -6,6 +6,8 @@ Supports full fine-tuning or parameter-efficient LoRA / QLoRA.
 """
 
 import argparse
+import glob
+import io
 import os
 import sys
 from dataclasses import dataclass
@@ -13,10 +15,11 @@ from typing import Any, Dict, List, Union
 from pathlib import Path
 import pandas as pd
 import torch
+from torch.utils.data import IterableDataset
 
 try:
     import evaluate
-    from datasets import Dataset, Audio
+    from datasets import Audio, Dataset, load_dataset
     from transformers import (
         WhisperForConditionalGeneration,
         WhisperProcessor,
@@ -59,9 +62,103 @@ def load_data_from_csv(csv_path, audio_dir):
     df["audio"] = df[audio_col].apply(lambda x: str(audio_base / x) if not Path(x).is_file() else str(x))
     df["sentence"] = df[text_col]
 
-    dataset = Dataset.from_pandas(df[["audio", "sentence"]])
-    dataset = dataset.cast_column("audio", Audio(sampling_rate=16000))
+    return Dataset.from_pandas(df[["audio", "sentence"]])
+
+def resolve_parquet_files(patterns: str) -> list[str]:
+    """Resolve comma-separated parquet globs into a stable file list."""
+    files: list[str] = []
+    for pattern in [item.strip() for item in patterns.split(",") if item.strip()]:
+        matches = sorted(glob.glob(pattern))
+        if matches:
+            files.extend(matches)
+        elif Path(pattern).is_file():
+            files.append(pattern)
+    deduped = list(dict.fromkeys(files))
+    if not deduped:
+        raise FileNotFoundError(f"No parquet files matched: {patterns}")
+    return deduped
+
+def normalize_dataset_columns(dataset):
+    """Standardize dataset columns to the trainer's expected audio/sentence pair."""
+    columns = list(getattr(dataset, "column_names", None) or [])
+    if not columns and hasattr(dataset, "features") and dataset.features:
+        columns = list(dataset.features.keys())
+    if "audio" not in columns:
+        raise ValueError(f"Parquet dataset must contain an 'audio' column. Found: {columns}")
+    text_col = next((c for c in ["sentence", "transcription", "ground_truth", "text", "transcript"] if c in columns), None)
+    if not text_col:
+        raise ValueError(f"Parquet dataset must contain a transcript/text column. Found: {columns}")
+    if text_col != "sentence":
+        dataset = dataset.rename_column(text_col, "sentence")
+    # Hugging Face can infer this struct as Audio and auto-decode through
+    # torchcodec. Keep decoding disabled so we read embedded WAV bytes with
+    # soundfile instead; this is more stable inside Docker and avoids writing
+    # permanent extracted WAV files.
+    dataset = dataset.cast_column("audio", Audio(decode=False))
     return dataset
+
+def decode_audio_for_features(audio: Any) -> dict[str, Any]:
+    """Decode path-based or Parquet embedded audio into a 16 kHz mono array."""
+    import librosa
+    import soundfile as sf
+
+    target_sr = 16000
+    if isinstance(audio, dict) and "array" in audio and "sampling_rate" in audio:
+        array = audio["array"]
+        sr = audio["sampling_rate"]
+    elif isinstance(audio, dict) and audio.get("bytes") is not None:
+        array, sr = sf.read(io.BytesIO(audio["bytes"]), dtype="float32", always_2d=False)
+    else:
+        array, sr = librosa.load(str(audio), sr=None, mono=True)
+    if getattr(array, "ndim", 1) > 1:
+        array = array.mean(axis=1)
+    if sr != target_sr:
+        array = librosa.resample(array, orig_sr=sr, target_sr=target_sr)
+        sr = target_sr
+    return {"array": array, "sampling_rate": sr}
+
+def load_data_from_parquet(parquet_patterns: str, streaming: bool = False):
+    """Load Parquet ASR shards with embedded audio bytes, no WAV extraction required."""
+    files = resolve_parquet_files(parquet_patterns)
+    print(f"Loading {len(files)} parquet file(s): {files[0]}" + (f" ... {files[-1]}" if len(files) > 1 else ""))
+    if streaming:
+        return files
+    dataset = load_dataset("parquet", data_files=files, split="train", streaming=streaming)
+    return normalize_dataset_columns(dataset)
+
+def iter_parquet_examples(files: list[str]):
+    import pyarrow.parquet as pq
+
+    for parquet_path in files:
+        pf = pq.ParquetFile(parquet_path)
+        for batch in pf.iter_batches(batch_size=64):
+            for row in batch.to_pylist():
+                audio = row.get("audio") or {}
+                sentence = next((row.get(c) for c in ["sentence", "transcription", "ground_truth", "text", "transcript"] if row.get(c)), None)
+                if audio and sentence:
+                    yield {"audio": audio, "sentence": str(sentence).strip()}
+
+def inspect_parquet_patterns(name: str, patterns: str) -> None:
+    files = resolve_parquet_files(patterns)
+    sample = next(iter_parquet_examples(files))
+    audio = decode_audio_for_features(sample["audio"])
+    print(f"{name}: files={len(files)}, rows=streaming/unknown, columns=['audio', 'sentence']")
+    print(f"{name} sample keys={list(sample.keys())}, sentence={sample['sentence'][:120]}")
+    print(f"{name} audio sampling_rate={audio.get('sampling_rate')}, array_len={len(audio.get('array', []))}")
+
+class StreamingParquetSpeechDataset(IterableDataset):
+    def __init__(self, files: list[str], feature_extractor: Any, tokenizer: Any):
+        self.files = files
+        self.feature_extractor = feature_extractor
+        self.tokenizer = tokenizer
+
+    def __iter__(self):
+        for row in iter_parquet_examples(self.files):
+            audio = decode_audio_for_features(row["audio"])
+            yield {
+                "input_features": self.feature_extractor(audio["array"], sampling_rate=audio["sampling_rate"]).input_features[0],
+                "labels": self.tokenizer(row["sentence"]).input_ids,
+            }
 
 def main():
     try:
@@ -80,6 +177,10 @@ def main():
     parser.add_argument("--train_audio", default="data/train/audio", help="Training audio folder.")
     parser.add_argument("--val_csv", default="data/val/metadata.csv", help="Validation metadata CSV.")
     parser.add_argument("--val_audio", default="data/val/audio", help="Validation audio folder.")
+    parser.add_argument("--train_parquet", default=None, help="Comma-separated parquet files/globs for training. Uses embedded audio bytes directly.")
+    parser.add_argument("--val_parquet", default=None, help="Comma-separated parquet files/globs for validation. Uses embedded audio bytes directly.")
+    parser.add_argument("--streaming_parquet", action="store_true", help="Stream parquet shards instead of materializing them. Requires --max_steps > 0 for training.")
+    parser.add_argument("--dry_run_data", action="store_true", help="Load and inspect datasets, then exit before model loading/training.")
     parser.add_argument("--output_dir", default="./checkpoints/whisper_bangla_lora", help="Directory to save fine-tuned checkpoints.")
     parser.add_argument("--num_proc", type=int, default=2, help="Number of processes for feature extraction.")
 
@@ -125,10 +226,41 @@ def main():
     args = parser.parse_args()
     eval_bs = args.eval_batch_size if args.eval_batch_size is not None else args.batch_size
 
+    if args.streaming_parquet and args.max_steps <= 0:
+        raise ValueError("--streaming_parquet requires --max_steps > 0 because streaming datasets do not expose a fixed length.")
+
+    print("Loading datasets...")
+    train_dataset = load_data_from_parquet(args.train_parquet, args.streaming_parquet) if args.train_parquet else load_data_from_csv(args.train_csv, args.train_audio)
+    val_dataset = load_data_from_parquet(args.val_parquet, args.streaming_parquet) if args.val_parquet else load_data_from_csv(args.val_csv, args.val_audio)
+    if args.dry_run_data:
+        if args.streaming_parquet:
+            inspect_parquet_patterns("train", args.train_parquet)
+            inspect_parquet_patterns("validation", args.val_parquet)
+            return
+        def describe(name, dataset):
+            columns = list(getattr(dataset, "column_names", None) or getattr(dataset, "features", {}).keys())
+            length = "streaming/unknown"
+            try:
+                length = len(dataset)
+            except Exception:
+                pass
+            print(f"{name}: rows={length}, columns={columns}")
+            sample = next(iter(dataset))
+            print(f"{name} sample keys={list(sample.keys())}, sentence={str(sample.get('sentence', ''))[:120]}")
+            audio = decode_audio_for_features(sample.get("audio"))
+            print(f"{name} audio sampling_rate={audio.get('sampling_rate')}, array_len={len(audio.get('array', []))}")
+        describe("train", train_dataset)
+        describe("validation", val_dataset)
+        return
+
     print(f"Loading processor and model: {args.model_name_or_path}...")
     feature_extractor = WhisperFeatureExtractor.from_pretrained(args.model_name_or_path)
     tokenizer = WhisperTokenizer.from_pretrained(args.model_name_or_path, language=args.language, task=args.task)
     processor = WhisperProcessor.from_pretrained(args.model_name_or_path, language=args.language, task=args.task)
+
+    if args.streaming_parquet:
+        train_dataset = StreamingParquetSpeechDataset(train_dataset, feature_extractor, tokenizer)
+        val_dataset = StreamingParquetSpeechDataset(val_dataset, feature_extractor, tokenizer)
 
     is_cuda = torch.cuda.is_available()
     is_mps = hasattr(torch.backends, "mps") and torch.backends.mps.is_available()
@@ -175,19 +307,18 @@ def main():
         model = get_peft_model(model, lora_config)
         model.print_trainable_parameters()
 
-    print("Loading datasets...")
-    train_dataset = load_data_from_csv(args.train_csv, args.train_audio)
-    val_dataset = load_data_from_csv(args.val_csv, args.val_audio)
-
     def prepare_dataset(batch):
-        audio = batch["audio"]
+        audio = decode_audio_for_features(batch["audio"])
         batch["input_features"] = feature_extractor(audio["array"], sampling_rate=audio["sampling_rate"]).input_features[0]
         batch["labels"] = tokenizer(batch["sentence"]).input_ids
         return batch
 
-    print("Preprocessing datasets (extracting Mel features & tokenizing)...")
-    train_dataset = train_dataset.map(prepare_dataset, remove_columns=train_dataset.column_names, num_proc=args.num_proc)
-    val_dataset = val_dataset.map(prepare_dataset, remove_columns=val_dataset.column_names, num_proc=args.num_proc)
+    if not args.streaming_parquet:
+        print("Preprocessing datasets (extracting Mel features & tokenizing)...")
+        train_columns = list(getattr(train_dataset, "column_names", None) or getattr(train_dataset, "features", {}).keys())
+        val_columns = list(getattr(val_dataset, "column_names", None) or getattr(val_dataset, "features", {}).keys())
+        train_dataset = train_dataset.map(prepare_dataset, remove_columns=train_columns, num_proc=args.num_proc)
+        val_dataset = val_dataset.map(prepare_dataset, remove_columns=val_columns, num_proc=args.num_proc)
 
     data_collator = DataCollatorSpeechSeq2SeqWithPadding(processor=processor)
 

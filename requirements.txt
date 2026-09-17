@@ -4,6 +4,7 @@ soundfile
 librosa
 jiwer
 pandas
+pyarrow>=15.0.0
 tqdm
 fastapi
 uvicorn[standard]

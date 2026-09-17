@@ -28,7 +28,7 @@ This project solves those by combining:
 - Bangla/English decoding profiles and post-processing guards.
 - Whisper model cache under `models/` so downloads survive rebuilds.
 - Dataset layout for `train`, `val`, and `test` splits.
-- GPU fine-tuning with LoRA/QLoRA options.
+- GPU fine-tuning with LoRA/QLoRA options, including direct Parquet training without full WAV extraction.
 - Controlled model training workflow: backup old model, evaluate old model, train new model, evaluate new model, compare results.
 - Docker CPU, Docker dev hot reload, and NVIDIA GPU override.
 
@@ -160,18 +160,20 @@ Then run:
 ./docker-start.sh gpu
 ```
 
-For training endpoints inside Docker, set this in `.env` before building:
+For training inside Docker, use the GPU stack. The GPU override installs the training dependencies by default, including `datasets` and `pyarrow` for direct Parquet loading:
+
+```bash
+./docker-start.sh gpu
+```
+
+If you run training/data-preparation jobs that need to write into `./data`, set this in `.env` before building:
 
 ```env
 INSTALL_TRAINING=true
 DATA_MOUNT_MODE=rw
 ```
 
-Then rebuild:
-
-```bash
-./docker-start.sh gpu
-```
+For direct Parquet training, read-only `DATA_MOUNT_MODE=ro` is enough because the shards are read from `./data` and checkpoints are written to `./checkpoints`.
 
 ## Local development setup
 
@@ -287,7 +289,15 @@ Meaning:
 - `FAIL`: a shard failed after retries
 - `SUBAK.KO download complete`: all selected files completed
 
-Note: Hugging Face ASR datasets may be Parquet files with embedded audio, not plain `.wav` files. Download completion does not always mean training-ready audio exists. Extraction/conversion may still be required.
+Note: Hugging Face ASR datasets may be Parquet files with embedded audio, not plain `.wav` files. This project can use those Parquet files directly for training/evaluation through the CLI, so full WAV extraction is not required for large datasets such as SUBAK.KO.
+
+SUBAK.KO direct Parquet layout after download:
+
+```text
+data/sources/subakko/hf/Data/train-*.parquet       # training shards
+data/sources/subakko/hf/Data/validation-*.parquet  # validation shards
+data/sources/subakko/hf/Data/test-*.parquet        # held-out test shards
+```
 
 ## Model download
 
@@ -359,6 +369,27 @@ Outputs:
 
 Lower WER/CER is better.
 
+Evaluate directly from Parquet without extracting permanent WAV files:
+
+```bash
+python3 scripts/evaluate.py \
+  --parquet 'data/sources/subakko/hf/Data/test-*.parquet' \
+  --model large-v3-turbo \
+  --language bn \
+  --output reports/baseline-old.csv
+```
+
+For a quick smoke test, cap samples:
+
+```bash
+python3 scripts/evaluate.py \
+  --parquet 'data/sources/subakko/hf/Data/test-*.parquet' \
+  --max_samples 20 \
+  --model large-v3-turbo \
+  --language bn \
+  --output reports/parquet-smoke.csv
+```
+
 ## Controlled training workflow: backup → baseline → train → compare
 
 Before any real training run, do this sequence so the project does not enter an uncontrolled gray area.
@@ -387,70 +418,89 @@ The backup command writes `backup_manifest.json` inside the backup folder.
 
 ### 2. Evaluate the old model on the fixed test set
 
+For Docker, run evaluation inside the backend container. This reads SUBAK.KO Parquet directly and does not permanently extract WAV files:
+
 ```bash
-python3 scripts/evaluate.py \
-  --metadata data/test/metadata.csv \
-  --audio_dir data/test/audio \
-  --model large-v3-turbo \
-  --language bn \
-  --output reports/baseline-old.csv
+docker compose -f docker-compose.yml -f docker-compose.gpu.yml run --rm backend \
+  python scripts/evaluate.py \
+    --parquet '/app/data/sources/subakko/hf/Data/test-*.parquet' \
+    --model large-v3-turbo \
+    --language bn \
+    --output /app/checkpoints/baseline-old.csv
+```
+
+Quick smoke test before the full baseline:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.gpu.yml run --rm backend \
+  python scripts/evaluate.py \
+    --parquet '/app/data/sources/subakko/hf/Data/test-*.parquet' \
+    --max_samples 20 \
+    --model large-v3-turbo \
+    --language bn \
+    --output /app/checkpoints/parquet-smoke.csv
 ```
 
 ### 3. Train the new model
 
-Install GPU/training requirements on the training machine:
+Build/run the GPU Docker image first. The GPU override installs the training stack and Parquet dependencies:
 
 ```bash
-pip install -r requirements_gpu.txt
+./docker-start.sh gpu
 ```
 
-Run LoRA training:
+Check Parquet loading before starting an expensive model run:
 
 ```bash
-python3 scripts/train_whisper.py \
-  --model_name_or_path openai/whisper-large-v3-turbo \
-  --train_csv data/train/metadata.csv \
-  --train_audio data/train/audio \
-  --val_csv data/val/metadata.csv \
-  --val_audio data/val/audio \
-  --output_dir checkpoints/whisper_bangla_lora \
-  --language bengali \
-  --task transcribe \
-  --use_lora \
-  --batch_size 8 \
-  --eval_batch_size 8 \
-  --gradient_accumulation_steps 2 \
-  --learning_rate 1e-4 \
-  --num_epochs 5 \
-  --eval_steps 200 \
-  --save_steps 200 \
-  --metric_for_best_model wer
+docker compose -f docker-compose.yml -f docker-compose.gpu.yml run --rm backend \
+  python scripts/train_whisper.py \
+    --train_parquet '/app/data/sources/subakko/hf/Data/train-00000-of-00047.parquet' \
+    --val_parquet '/app/data/sources/subakko/hf/Data/validation-00000-of-00005.parquet' \
+    --dry_run_data
 ```
 
-Or use the example launcher:
+Run LoRA training directly from Parquet. Use `--streaming_parquet` to avoid duplicating the dataset on disk; set `--max_steps` because streaming datasets do not have a fixed length:
 
 ```bash
-bash scripts/run_train_gpu.sh
+docker compose -f docker-compose.yml -f docker-compose.gpu.yml run --rm backend \
+  python scripts/train_whisper.py \
+    --model_name_or_path openai/whisper-large-v3-turbo \
+    --train_parquet '/app/data/sources/subakko/hf/Data/train-*.parquet' \
+    --val_parquet '/app/data/sources/subakko/hf/Data/validation-*.parquet' \
+    --streaming_parquet \
+    --max_steps 2000 \
+    --output_dir /app/checkpoints/whisper_bangla_lora \
+    --language bengali \
+    --task transcribe \
+    --use_lora \
+    --batch_size 8 \
+    --eval_batch_size 8 \
+    --gradient_accumulation_steps 2 \
+    --learning_rate 1e-4 \
+    --eval_steps 200 \
+    --save_steps 200 \
+    --metric_for_best_model wer
 ```
 
 ### 4. Evaluate the new trained model on the exact same test set
 
 ```bash
-python3 scripts/evaluate.py \
-  --metadata data/test/metadata.csv \
-  --audio_dir data/test/audio \
-  --model checkpoints/whisper_bangla_lora \
-  --language bn \
-  --output reports/after-new.csv
+docker compose -f docker-compose.yml -f docker-compose.gpu.yml run --rm backend \
+  python scripts/evaluate.py \
+    --parquet '/app/data/sources/subakko/hf/Data/test-*.parquet' \
+    --model /app/checkpoints/whisper_bangla_lora \
+    --language bn \
+    --output /app/checkpoints/after-new.csv
 ```
 
 ### 5. Compare old vs new
 
 ```bash
-python3 scripts/model_guard.py compare \
-  --old reports/baseline-old.csv \
-  --new reports/after-new.csv \
-  --output reports/model_comparison.json
+docker compose -f docker-compose.yml -f docker-compose.gpu.yml run --rm backend \
+  python scripts/model_guard.py compare \
+    --old /app/checkpoints/baseline-old.csv \
+    --new /app/checkpoints/after-new.csv \
+    --output /app/checkpoints/model_comparison.json
 ```
 
 This writes:
