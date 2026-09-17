@@ -1,18 +1,16 @@
 #!/usr/bin/env bash
-# One-click launcher for the Bangla & English ASR React + FastAPI Studio.
+set -euo pipefail
 
-set -e
+# Prevent macOS from creating AppleDouble files while Docker archives context.
+export COPYFILE_DISABLE=1
+export DOCKER_BUILDKIT=1
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cd "$SCRIPT_DIR"
+mkdir -p logs
+find . -name '._*' -type f -delete
 
-echo "============================================================"
-echo "          Bangla & English ASR Studio Launcher              "
-echo "============================================================"
-echo "Frontend UI : http://127.0.0.1:5173  |  http://192.168.50.140:5173"
-echo "Backend API : http://127.0.0.1:8000  |  http://192.168.50.140:8000"
-echo "============================================================"
-echo ""
+LOG_FILE="logs/docker-up.log"
+echo "Starting Bangla ASR stack (CPU/macOS-compatible)..."
+echo "Live log file: ${LOG_FILE}"
+echo "Watch from another terminal: tail -f ${LOG_FILE}"
 
-exec "$SCRIPT_DIR/run_ui.sh" "$@"
-
+docker compose --progress plain -f docker-compose.yml up --build 2>&1 | tee "${LOG_FILE}"
