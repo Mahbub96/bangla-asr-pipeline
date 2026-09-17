@@ -1,0 +1,69 @@
+# ---------------------------------------------------------------------------
+# Bangla & English ASR Studio — production stack (CPU by default)
+#
+#   docker compose up --build          ->  UI http://localhost:8080
+#                                          API http://localhost:8000
+#
+# Runs anywhere Docker runs: Linux, macOS (Intel + Apple Silicon), Windows.
+# Copy .env.example to .env to change ports, model cache, or thread counts.
+#
+# Variants (compose overrides, applied on top of this file):
+#   GPU  : docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
+#   DEV  : docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+# ---------------------------------------------------------------------------
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+      args:
+        # CPU wheels by default; docker-compose.gpu.yml swaps in the CUDA index.
+        TORCH_INDEX_URL: ${TORCH_INDEX_URL:-https://download.pytorch.org/whl/cpu}
+        INSTALL_TRAINING: ${INSTALL_TRAINING:-false}
+    image: bangla-asr-backend:latest
+    container_name: bangla-asr-backend
+    restart: unless-stopped
+    environment:
+      ASR_HOST: 0.0.0.0
+      ASR_PORT: 8000
+      ASR_CORS_ORIGINS: ${ASR_CORS_ORIGINS:-*}
+      HF_HOME: /app/models
+      HF_HUB_CACHE: /app/models
+      OMP_NUM_THREADS: ${OMP_NUM_THREADS:-4}
+    volumes:
+      # Model weights and datasets live on the host — images stay small and the
+      # multi-GB Whisper download survives image rebuilds.
+      - ./models:/app/models
+      - ./data:/app/data
+      - asr-tmp:/app/.tmp
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    networks: [asr]
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      target: prod
+      args:
+        # Empty => same-origin requests, reverse-proxied to the backend by nginx.
+        VITE_API_BASE: ${VITE_API_BASE:-}
+    image: bangla-asr-frontend:latest
+    container_name: bangla-asr-frontend
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    environment:
+      BACKEND_UPSTREAM: ${BACKEND_UPSTREAM:-http://backend:8000}
+    ports:
+      - "${FRONTEND_PORT:-8080}:80"
+    networks: [asr]
+
+volumes:
+  asr-tmp:
+
+networks:
+  asr:
+    driver: bridge

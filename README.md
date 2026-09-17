@@ -31,7 +31,15 @@ Designed with a local-first full-stack architecture:
 ```text
 Bangla ASR/
 ├── backend/                 # FastAPI app, routers, and ASR service layer
+│   └── Dockerfile           # Backend image (CPU or CUDA via build arg)
 ├── frontend/                # Vite React TypeScript operator UI
+│   ├── Dockerfile           # Multi-stage: dev (HMR) / prod (nginx)
+│   └── nginx.conf.template  # SPA + /api reverse proxy (SSE-aware)
+├── docker-compose.yml       # Production stack (CPU)
+├── docker-compose.dev.yml   # Dev override: hot reload, mounted sources
+├── docker-compose.gpu.yml   # NVIDIA CUDA override
+├── docker-start.sh          # Cross-platform Docker launcher
+├── .env.example             # Ports, CORS, torch index, thread counts
 ├── start.sh                 # One-click launcher for frontend + backend
 ├── run_ui.sh                # Launches React + FastAPI dev stack
 ├── run_api.sh               # Launches FastAPI backend only
@@ -82,6 +90,74 @@ Verify audio file integrity and check for missing files referenced in the CSV:
 ```bash
 python scripts/prepare_data.py --validate --csv data/test/metadata.csv --audio_dir data/test/audio
 ```
+
+---
+
+## 🐳 Run with Docker (any OS)
+
+The fastest way to run the full stack on Linux, macOS (Intel or Apple Silicon)
+and Windows. Only Docker Desktop / Docker Engine with the Compose v2 plugin is
+required — no Python, Node, or ffmpeg on the host.
+
+### Production stack
+
+```bash
+cp .env.example .env          # optional: change ports, CORS, thread count
+./docker-start.sh             # or: docker compose up -d --build
+```
+
+| Service  | URL                     | Notes                                   |
+| -------- | ----------------------- | --------------------------------------- |
+| UI       | `http://localhost:8080` | nginx serving the built SPA             |
+| API      | `http://localhost:8000` | FastAPI (also proxied at `/api` via UI) |
+| Health   | `/api/health`           | container healthcheck endpoint          |
+
+The frontend talks to the backend through nginx on the same origin, so no CORS
+configuration is needed for the default setup.
+
+### Development stack (hot reload)
+
+```bash
+./docker-start.sh dev         # UI on http://localhost:5173
+```
+
+Sources are bind-mounted: Vite HMR reloads the React app and `uvicorn --reload`
+restarts the API on changes to `backend/` or `scripts/`. `node_modules` lives in
+an anonymous volume so a host install built for another OS never leaks in.
+
+### NVIDIA GPU
+
+```bash
+./docker-start.sh gpu         # CUDA 12.1 torch wheels + fine-tuning stack
+```
+
+Requires the NVIDIA Container Toolkit on the host (Linux or WSL2; macOS cannot
+pass through a GPU). Verify the host first:
+
+```bash
+docker run --rm --gpus all nvidia/cuda:12.1.0-base-ubuntu22.04 nvidia-smi
+```
+
+### Models and datasets
+
+`./models` and `./data` are bind-mounted into the container, so the multi-GB
+Whisper weights are downloaded once and survive image rebuilds. An existing
+local `models/` cache is picked up automatically.
+
+### Common commands
+
+```bash
+./docker-start.sh down                  # stop everything
+docker compose logs -f backend          # follow backend logs
+docker compose exec backend python -c "import torch; print(torch.__version__)"
+```
+
+### Microphone access
+
+Browsers only expose `getUserMedia` on `localhost` or HTTPS. Opening the UI via
+a LAN IP (e.g. `http://192.168.x.x:8080`) will show the upload fallback instead
+of live recording — use `localhost` on the machine itself, or put the stack
+behind a TLS terminator for LAN recording.
 
 ---
 

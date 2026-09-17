@@ -1,0 +1,28 @@
+# ---------------------------------------------------------------------------
+# NVIDIA GPU override.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build
+#
+# Requires the NVIDIA Container Toolkit on the host (Linux or WSL2).
+# Not usable on macOS — Docker Desktop cannot pass through a GPU there.
+# Verify the host first:  docker run --rm --gpus all nvidia/cuda:12.1.0-base-ubuntu22.04 nvidia-smi
+# ---------------------------------------------------------------------------
+
+services:
+  backend:
+    build:
+      args:
+        TORCH_INDEX_URL: ${TORCH_INDEX_URL:-https://download.pytorch.org/whl/cu121}
+        # GPU images ship the fine-tuning stack by default.
+        INSTALL_TRAINING: ${INSTALL_TRAINING:-true}
+    image: bangla-asr-backend:gpu
+    environment:
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]

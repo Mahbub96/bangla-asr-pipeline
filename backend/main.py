@@ -3,23 +3,21 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from starlette.responses import FileResponse
 
-from backend.config import FRONTEND_DIST
+from backend.config import CORS_ORIGINS, FRONTEND_DIST
 from backend.routers import batch, diagnostics, evaluate, jobs, train, transcribe
 
 app = FastAPI(title="Bangla & English ASR Studio API", version="1.0.0")
 
+# ASR_CORS_ORIGINS="*" (the container default) allows any origin. Credentials
+# cannot be combined with a wildcard origin list, so they are disabled in that
+# mode — the API is token-less anyway.
+_allow_any_origin = "*" in CORS_ORIGINS
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origin_regex=r"^https?://.*",
-    allow_origins=[
-        "http://127.0.0.1:5173",
-        "http://localhost:5173",
-        "http://127.0.0.1:8000",
-        "http://localhost:8000",
-        "http://192.168.50.140:5173",
-        "http://192.168.50.140:8000",
-    ],
-    allow_credentials=True,
+    allow_origins=[] if _allow_any_origin else CORS_ORIGINS,
+    allow_origin_regex=r"^https?://.*" if _allow_any_origin else None,
+    allow_credentials=not _allow_any_origin,
     allow_methods=["*"],
     allow_headers=["*"],
 )

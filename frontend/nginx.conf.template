@@ -1,0 +1,65 @@
+# nginx config for the production frontend image.
+# ${BACKEND_UPSTREAM} is substituted at container start by the nginx entrypoint
+# (envsubst on /etc/nginx/templates/*.template).
+
+server {
+    listen       80;
+    server_name  _;
+
+    root  /usr/share/nginx/html;
+    index index.html;
+
+    # Audio uploads (batch + long recordings) need a generous body limit.
+    client_max_body_size 512M;
+
+    gzip              on;
+    gzip_min_length   1024;
+    gzip_types        text/plain text/css application/javascript application/json image/svg+xml;
+
+    location = /healthz {
+        access_log off;
+        add_header Content-Type text/plain;
+        return 200 "ok\n";
+    }
+
+    # Hashed Vite assets are immutable.
+    location /assets/ {
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+        try_files $uri =404;
+    }
+
+    # Server-Sent Events: job progress streams must not be buffered.
+    location ~ ^/api/jobs/[^/]+/events$ {
+        proxy_pass              ${BACKEND_UPSTREAM};
+        proxy_http_version      1.1;
+        proxy_set_header        Host              $host;
+        proxy_set_header        X-Real-IP         $remote_addr;
+        proxy_set_header        X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header        X-Forwarded-Proto $scheme;
+        proxy_set_header        Connection        "";
+        proxy_buffering         off;
+        proxy_cache             off;
+        chunked_transfer_encoding off;
+        proxy_read_timeout      24h;
+        proxy_send_timeout      24h;
+    }
+
+    location /api/ {
+        proxy_pass            ${BACKEND_UPSTREAM};
+        proxy_http_version    1.1;
+        proxy_set_header      Host              $host;
+        proxy_set_header      X-Real-IP         $remote_addr;
+        proxy_set_header      X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header      X-Forwarded-Proto $scheme;
+        proxy_request_buffering off;
+        # Transcription / evaluation requests can run for minutes.
+        proxy_read_timeout    1800s;
+        proxy_send_timeout    1800s;
+    }
+
+    # SPA fallback.
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+}

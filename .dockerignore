@@ -1,0 +1,45 @@
+# Git / CI
+.git
+.gitignore
+.github
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+ENV/
+env/
+*.egg-info/
+
+# Large artefacts — mounted as volumes at runtime instead of baked into the image
+models/
+checkpoints/
+output_*/
+data/
+runs/
+*.pt
+*.pth
+*.bin
+*.safetensors
+*.onnx
+
+# Frontend (built in its own image/stage)
+frontend/node_modules/
+frontend/dist/
+frontend/*.tsbuildinfo
+
+# Local state
+.tmp/
+.ssl/
+*.log
+evaluation_results.csv
+test_transcriptions.json
+batch_transcriptions.json
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

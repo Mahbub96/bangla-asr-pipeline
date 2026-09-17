@@ -1,0 +1,55 @@
+# ---------------------------------------------------------------------------
+# Development override: Vite dev server with HMR + uvicorn --reload.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
+#
+#   UI  -> http://localhost:5173   (hot reload, source mounted from host)
+#   API -> http://localhost:8000   (auto-reload on backend/ + scripts/ changes)
+#
+# node_modules stays in an anonymous volume so the container's Linux-native
+# install is never shadowed by a host install built for another platform.
+# ---------------------------------------------------------------------------
+
+services:
+  backend:
+    # Exec form (no shell): a YAML folded scalar would keep literal newlines,
+    # and `sh -c` would then split them into separate commands — silently
+    # dropping --host and leaving uvicorn bound to 127.0.0.1.
+    command:
+      - uvicorn
+      - backend.main:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+      - --reload
+      - --reload-dir
+      - /app/backend
+      - --reload-dir
+      - /app/scripts
+    volumes:
+      - ./backend:/app/backend
+      - ./scripts:/app/scripts
+      - ./models:/app/models
+      - ./data:/app/data
+      - asr-tmp:/app/.tmp
+
+  frontend:
+    build:
+      target: dev
+    image: bangla-asr-frontend:dev
+    depends_on:
+      backend:
+        condition: service_started
+    environment:
+      # Vite proxies /api to the backend container (see frontend/vite.config.ts).
+      VITE_API_BASE: ""
+      VITE_PROXY_TARGET: http://backend:8000
+      # Required for file-watching on macOS/Windows bind mounts.
+      CHOKIDAR_USEPOLLING: "true"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    # Replaces the production 80 mapping rather than adding to it.
+    ports: !override
+      - "${DEV_FRONTEND_PORT:-5173}:5173"
