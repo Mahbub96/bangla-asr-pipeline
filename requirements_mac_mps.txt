@@ -1,0 +1,10 @@
+# Native Apple Silicon / MPS training stack.
+# Do not install bitsandbytes here; it is CUDA-only and not useful on macOS.
+-r requirements.txt
+transformers>=4.40.0
+datasets>=2.18.0
+accelerate>=0.28.0
+peft>=0.10.0
+evaluate>=0.4.0
+scipy>=1.11.0
+tensorboard>=2.15.0

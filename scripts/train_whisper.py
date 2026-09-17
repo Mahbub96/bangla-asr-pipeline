@@ -426,7 +426,8 @@ def main():
         callbacks=[StructuredMetricsCallback(args.metrics_dir or Path(args.output_dir) / "metrics")],
     )
 
-    print("\nStarting Training on GPU...")
+    accelerator = "CUDA GPU" if is_cuda else ("Apple Silicon MPS" if is_mps else "CPU")
+    print(f"\nStarting Training on {accelerator}...")
     trainer.train()
 
     print(f"\nTraining complete. Saving best model checkpoint to {args.output_dir}...")
