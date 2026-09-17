@@ -5,7 +5,7 @@ from typing import Any
 from backend.config import ROOT_DIR, SCRIPTS_DIR
 
 
-def build_training_args(config: dict[str, Any]) -> list[str]:
+def build_raw_training_args(config: dict[str, Any]) -> list[str]:
     def value(name: str, default: Any) -> Any:
         current = config.get(name, default)
         return default if current in (None, "") else current
@@ -52,7 +52,7 @@ def build_training_args(config: dict[str, Any]) -> list[str]:
         "--num_epochs",
         str(int(value("num_epochs", 5))),
         "--max_steps",
-        str(int(value("max_steps", -1))),
+        str(int(value("max_steps", 2000))),
         "--eval_steps",
         str(int(value("eval_steps", 200))),
         "--save_steps",
@@ -116,6 +116,52 @@ def build_training_args(config: dict[str, Any]) -> list[str]:
     if config.get("gradient_checkpointing", True):
         args.append("--gradient_checkpointing")
 
+    return args
+
+
+def build_training_args(config: dict[str, Any]) -> list[str]:
+    raw_args = build_raw_training_args(config)
+    if config.get("dry_run_data", False) or not config.get("guarded_training", True):
+        return raw_args
+
+    def value(name: str, default: Any) -> Any:
+        current = config.get(name, default)
+        return default if current in (None, "") else current
+
+    args = [
+        sys.executable,
+        str(SCRIPTS_DIR / "guarded_train.py"),
+        "--backup_source",
+        str(value("backup_source", "models")),
+        "--backup_dest",
+        str(value("backup_dest", "backups/models")),
+        "--backup_name",
+        str(value("backup_name", "current")),
+        "--test_parquet",
+        str(value("test_parquet", "data/sources/subakko/hf/Data/test-*.parquet")),
+        "--baseline_output",
+        str(value("baseline_output", "checkpoints/baseline-old.csv")),
+        "--after_output",
+        str(value("after_output", "checkpoints/after-new.csv")),
+        "--comparison_output",
+        str(value("comparison_output", "checkpoints/model_comparison.json")),
+        "--eval_model_before",
+        str(value("eval_model_before", "large-v3-turbo")),
+        "--eval_engine_before",
+        str(value("eval_engine_before", "faster-whisper")),
+        "--eval_engine_after",
+        str(value("eval_engine_after", "transformers")),
+        "--models_dir",
+        str(value("models_dir", "models")),
+    ]
+    eval_model_after = str(value("eval_model_after", "")).strip()
+    if eval_model_after:
+        args.extend(["--eval_model_after", eval_model_after])
+    eval_max_samples = config.get("eval_max_samples")
+    if eval_max_samples not in (None, ""):
+        args.extend(["--eval_max_samples", str(int(eval_max_samples))])
+    args.append("--")
+    args.extend(raw_args)
     return args
 
 

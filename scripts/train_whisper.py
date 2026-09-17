@@ -6,8 +6,10 @@ Supports full fine-tuning or parameter-efficient LoRA / QLoRA.
 """
 
 import argparse
+import csv
 import glob
 import io
+import json
 import os
 import sys
 from dataclasses import dataclass
@@ -27,10 +29,12 @@ try:
         WhisperTokenizer,
         Seq2SeqTrainer,
         Seq2SeqTrainingArguments,
+        TrainerCallback,
     )
 except ImportError:
     # Notice for local execution
-    pass
+    class TrainerCallback:  # type: ignore[no-redef]
+        pass
 
 @dataclass
 class DataCollatorSpeechSeq2SeqWithPadding:
@@ -52,6 +56,33 @@ class DataCollatorSpeechSeq2SeqWithPadding:
 
         batch["labels"] = labels
         return batch
+
+class StructuredMetricsCallback(TrainerCallback):
+    """Persist trainer metrics as JSONL and CSV for later visualization."""
+
+    def __init__(self, metrics_dir: str | Path):
+        self.metrics_dir = Path(metrics_dir)
+        self.metrics_dir.mkdir(parents=True, exist_ok=True)
+        self.jsonl_path = self.metrics_dir / "trainer_log.jsonl"
+        self.csv_path = self.metrics_dir / "trainer_log.csv"
+        self.rows: list[dict[str, Any]] = []
+
+    def on_log(self, args, state, control, logs=None, **kwargs):
+        if not logs:
+            return
+        row = {
+            "step": state.global_step,
+            "epoch": float(state.epoch or 0),
+            **{key: value for key, value in logs.items() if isinstance(value, (int, float, str, bool))},
+        }
+        self.rows.append(row)
+        with self.jsonl_path.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(row, ensure_ascii=False) + "\n")
+        fieldnames = sorted({key for item in self.rows for key in item})
+        with self.csv_path.open("w", encoding="utf-8", newline="") as fh:
+            writer = csv.DictWriter(fh, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(self.rows)
 
 def load_data_from_csv(csv_path, audio_dir):
     df = pd.read_csv(csv_path)
@@ -182,6 +213,7 @@ def main():
     parser.add_argument("--streaming_parquet", action="store_true", help="Stream parquet shards instead of materializing them. Requires --max_steps > 0 for training.")
     parser.add_argument("--dry_run_data", action="store_true", help="Load and inspect datasets, then exit before model loading/training.")
     parser.add_argument("--output_dir", default="./checkpoints/whisper_bangla_lora", help="Directory to save fine-tuned checkpoints.")
+    parser.add_argument("--metrics_dir", default=None, help="Directory for structured JSONL/CSV training metrics. Default: output_dir/metrics.")
     parser.add_argument("--num_proc", type=int, default=2, help="Number of processes for feature extraction.")
 
     # LoRA / QLoRA
@@ -335,7 +367,9 @@ def main():
 
         wer = 100 * wer_metric.compute(predictions=pred_str, references=label_str)
         cer = 100 * cer_metric.compute(predictions=pred_str, references=label_str)
-        return {"wer": wer, "cer": cer}
+        exact_match = sum(1 for pred_text, ref_text in zip(pred_str, label_str) if pred_text.strip() == ref_text.strip()) / max(len(label_str), 1)
+        char_accuracy = max(0.0, 1.0 - (cer / 100.0))
+        return {"wer": wer, "cer": cer, "exact_match": exact_match, "char_accuracy": char_accuracy}
 
     import inspect
     eval_strat_key = "eval_strategy" if "eval_strategy" in inspect.signature(Seq2SeqTrainingArguments.__init__).parameters else "evaluation_strategy"
@@ -389,6 +423,7 @@ def main():
         data_collator=data_collator,
         compute_metrics=compute_metrics,
         tokenizer=processor.feature_extractor,
+        callbacks=[StructuredMetricsCallback(args.metrics_dir or Path(args.output_dir) / "metrics")],
     )
 
     print("\nStarting Training on GPU...")

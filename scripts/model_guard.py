@@ -14,7 +14,9 @@ import hashlib
 import json
 import shutil
 import sys
+from collections import Counter
 from datetime import datetime, timezone
+from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any
 
@@ -53,7 +55,7 @@ def tree_manifest(path: Path, *, hash_files: bool = False) -> dict[str, Any]:
     }
 
 
-def copy_backup(source: Path, destination_root: Path, name: str | None, hash_files: bool) -> Path:
+def copy_backup(source: Path, destination_root: Path, name: str | None, hash_files: bool, single: bool = False) -> Path:
     source = source.resolve()
     if not source.exists():
         raise FileNotFoundError(f"Source model/checkpoint does not exist: {source}")
@@ -62,10 +64,16 @@ def copy_backup(source: Path, destination_root: Path, name: str | None, hash_fil
 
     backup_name = name or f"{source.name}-{utc_stamp()}"
     backup_dir = destination_root / backup_name
-    if backup_dir.exists():
-        raise FileExistsError(f"Backup destination already exists: {backup_dir}")
 
     destination_root.mkdir(parents=True, exist_ok=True)
+    if single:
+        for existing in destination_root.iterdir():
+            if existing.is_dir():
+                shutil.rmtree(existing)
+            else:
+                existing.unlink()
+    elif backup_dir.exists():
+        raise FileExistsError(f"Backup destination already exists: {backup_dir}")
     shutil.copytree(source, backup_dir)
 
     manifest = tree_manifest(backup_dir, hash_files=hash_files)
@@ -81,6 +89,25 @@ def copy_backup(source: Path, destination_root: Path, name: str | None, hash_fil
         json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
     )
     return backup_dir
+
+
+def attach_evaluation_metrics(backup_dir: Path, evaluation: dict[str, Any], evaluation_csv: Path) -> None:
+    """Attach baseline WER/CER metrics to a backup manifest.
+
+    The backup is useful only if we know how the backed-up model performed on
+    the fixed test set. Keep that score next to the one retained backup so a
+    later manual decision has the exact baseline evidence.
+    """
+    manifest_path = backup_dir / "backup_manifest.json"
+    if not manifest_path.is_file():
+        raise FileNotFoundError(f"Backup manifest not found: {manifest_path}")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["baseline_evaluation"] = {
+        "created_at_utc": utc_stamp(),
+        "csv": str(evaluation_csv.resolve()),
+        "metrics": evaluation,
+    }
+    manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 def read_eval_csv(path: Path) -> tuple[list[str], list[str], list[float], list[float]]:
@@ -122,6 +149,105 @@ def metrics(path: Path) -> dict[str, Any]:
     return result
 
 
+def confusion_matrix(path: Path, *, max_items: int = 40) -> dict[str, Any]:
+    refs, hyps, _, _ = read_eval_csv(path)
+    substitutions: Counter[tuple[str, str]] = Counter()
+    deletions: Counter[str] = Counter()
+    insertions: Counter[str] = Counter()
+    exact = 0
+    total_ref_tokens = 0
+    total_pred_tokens = 0
+
+    for ref, hyp in zip(refs, hyps):
+        ref_tokens = ref.split()
+        hyp_tokens = hyp.split()
+        total_ref_tokens += len(ref_tokens)
+        total_pred_tokens += len(hyp_tokens)
+        matcher = SequenceMatcher(a=ref_tokens, b=hyp_tokens, autojunk=False)
+        for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+            if tag == "equal":
+                exact += i2 - i1
+            elif tag == "replace":
+                paired = min(i2 - i1, j2 - j1)
+                for offset in range(paired):
+                    substitutions[(ref_tokens[i1 + offset], hyp_tokens[j1 + offset])] += 1
+                for token in ref_tokens[i1 + paired : i2]:
+                    deletions[token] += 1
+                for token in hyp_tokens[j1 + paired : j2]:
+                    insertions[token] += 1
+            elif tag == "delete":
+                for token in ref_tokens[i1:i2]:
+                    deletions[token] += 1
+            elif tag == "insert":
+                for token in hyp_tokens[j1:j2]:
+                    insertions[token] += 1
+
+    top_substitutions = [
+        {"expected": expected, "predicted": predicted, "count": count}
+        for (expected, predicted), count in substitutions.most_common(max_items)
+    ]
+    top_deletions = [{"expected": token, "count": count} for token, count in deletions.most_common(max_items)]
+    top_insertions = [{"predicted": token, "count": count} for token, count in insertions.most_common(max_items)]
+    return {
+        "token_totals": {
+            "reference": total_ref_tokens,
+            "prediction": total_pred_tokens,
+            "exact": exact,
+            "substitutions": sum(substitutions.values()),
+            "deletions": sum(deletions.values()),
+            "insertions": sum(insertions.values()),
+        },
+        "top_substitutions": top_substitutions,
+        "top_deletions": top_deletions,
+        "top_insertions": top_insertions,
+    }
+
+
+def write_confusion_csv(matrix: dict[str, Any], output: Path) -> None:
+    output.parent.mkdir(parents=True, exist_ok=True)
+    with output.open("w", encoding="utf-8", newline="") as fh:
+        writer = csv.DictWriter(fh, fieldnames=["type", "expected", "predicted", "count"])
+        writer.writeheader()
+        for row in matrix["top_substitutions"]:
+            writer.writerow({"type": "substitution", **row})
+        for row in matrix["top_deletions"]:
+            writer.writerow({"type": "deletion", "expected": row["expected"], "predicted": "", "count": row["count"]})
+        for row in matrix["top_insertions"]:
+            writer.writerow({"type": "insertion", "expected": "", "predicted": row["predicted"], "count": row["count"]})
+
+
+def write_analysis_artifacts(report: dict[str, Any], old_csv: Path, new_csv: Path, output: Path) -> dict[str, Any]:
+    old_matrix = confusion_matrix(old_csv)
+    new_matrix = confusion_matrix(new_csv)
+    analysis = {
+        "old_confusion_matrix": old_matrix,
+        "new_confusion_matrix": new_matrix,
+        "charts": {
+            "wer_cer_bar": [
+                {"model": "old", "wer": report["old"].get("corpus_wer", report["old"]["mean_sample_wer"]), "cer": report["old"].get("corpus_cer", report["old"]["mean_sample_cer"])},
+                {"model": "new", "wer": report["new"].get("corpus_wer", report["new"]["mean_sample_wer"]), "cer": report["new"].get("corpus_cer", report["new"]["mean_sample_cer"])},
+            ],
+            "old_error_pie": old_matrix["token_totals"],
+            "new_error_pie": new_matrix["token_totals"],
+        },
+    }
+    analysis_path = output.with_name(f"{output.stem}_analysis.json")
+    chart_path = output.with_name(f"{output.stem}_chart_data.json")
+    old_confusion_path = output.with_name(f"{output.stem}_old_confusion.csv")
+    new_confusion_path = output.with_name(f"{output.stem}_new_confusion.csv")
+    analysis_path.write_text(json.dumps(analysis, ensure_ascii=False, indent=2), encoding="utf-8")
+    chart_path.write_text(json.dumps(analysis["charts"], ensure_ascii=False, indent=2), encoding="utf-8")
+    write_confusion_csv(old_matrix, old_confusion_path)
+    write_confusion_csv(new_matrix, new_confusion_path)
+    return {
+        "analysis_json": str(analysis_path.resolve()),
+        "chart_data_json": str(chart_path.resolve()),
+        "old_confusion_csv": str(old_confusion_path.resolve()),
+        "new_confusion_csv": str(new_confusion_path.resolve()),
+        "analysis": analysis,
+    }
+
+
 def compare(old_csv: Path, new_csv: Path, output: Path) -> dict[str, Any]:
     old = metrics(old_csv)
     new = metrics(new_csv)
@@ -160,6 +286,8 @@ def compare(old_csv: Path, new_csv: Path, output: Path) -> dict[str, Any]:
     }
 
     output.parent.mkdir(parents=True, exist_ok=True)
+    report.update(write_analysis_artifacts(report, old_csv, new_csv, output))
+
     output.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     md = output.with_suffix(".md")
     md.write_text(render_markdown(report), encoding="utf-8")
@@ -205,6 +333,8 @@ def main() -> int:
     backup.add_argument("--dest", default=Path("backups/models"), type=Path, help="Backup root directory.")
     backup.add_argument("--name", default=None, help="Backup folder name. Default: source-timestamp.")
     backup.add_argument("--hash", action="store_true", help="Also compute sha256 per file; slower for large models.")
+    backup.add_argument("--single", action="store_true", help="Keep only this backup under --dest by deleting older backups first.")
+    backup.add_argument("--metrics", default=None, type=Path, help="Optional evaluation CSV to store WER/CER in backup_manifest.json.")
 
     cmp_parser = sub.add_parser("compare", help="Compare old/new evaluation CSVs from scripts/evaluate.py.")
     cmp_parser.add_argument("--old", required=True, type=Path, help="Baseline/old evaluation CSV.")
@@ -213,7 +343,9 @@ def main() -> int:
 
     args = parser.parse_args()
     if args.command == "backup":
-        backup_dir = copy_backup(args.source, args.dest, args.name, args.hash)
+        backup_dir = copy_backup(args.source, args.dest, args.name, args.hash, args.single)
+        if args.metrics:
+            attach_evaluation_metrics(backup_dir, metrics(args.metrics), args.metrics)
         print(f"Backup created: {backup_dir.resolve()}")
         print(f"Manifest: {(backup_dir / 'backup_manifest.json').resolve()}")
         return 0

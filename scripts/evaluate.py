@@ -27,6 +27,76 @@ def compute_metrics(ground_truth_list, hypothesis_list):
     cer = jiwer.cer(ground_truth_list, hypothesis_list)
     return wer, cer
 
+def load_audio_array(audio_path: Path, target_sr: int = 16000):
+    import librosa
+    import soundfile as sf
+
+    array, sr = sf.read(audio_path, dtype="float32", always_2d=False)
+    if getattr(array, "ndim", 1) > 1:
+        array = array.mean(axis=1)
+    if sr != target_sr:
+        array = librosa.resample(array, orig_sr=sr, target_sr=target_sr)
+        sr = target_sr
+    return array, sr
+
+def get_transformers_transcriber(model_name, language="bn", device=None):
+    import json
+    import torch
+    from transformers import WhisperForConditionalGeneration, WhisperProcessor
+
+    model_path = Path(model_name)
+    adapter_config = model_path / "adapter_config.json"
+    processor = WhisperProcessor.from_pretrained(model_name, language="bengali" if language == "bn" else None, task="transcribe")
+
+    if adapter_config.is_file():
+        from peft import PeftModel
+
+        config = json.loads(adapter_config.read_text(encoding="utf-8"))
+        base_model = config.get("base_model_name_or_path")
+        if not base_model:
+            raise ValueError(f"LoRA adapter config missing base_model_name_or_path: {adapter_config}")
+        model = WhisperForConditionalGeneration.from_pretrained(base_model)
+        model = PeftModel.from_pretrained(model, model_name)
+    else:
+        model = WhisperForConditionalGeneration.from_pretrained(model_name)
+
+    if device is None:
+        if torch.cuda.is_available():
+            device = "cuda"
+        elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+            device = "mps"
+        else:
+            device = "cpu"
+    model.to(device)
+    model.eval()
+    print(f"Loading Transformers Whisper model '{model_name}' on {device.upper()}...")
+    return processor, model, device
+
+def transcribe_file_transformers(processor, model, device, audio_path: Path, language="bn"):
+    import torch
+
+    array, sr = load_audio_array(audio_path)
+    inputs = processor(array, sampling_rate=sr, return_tensors="pt")
+    input_features = inputs.input_features.to(device)
+    forced_decoder_ids = None
+    if language != "auto":
+        forced_decoder_ids = processor.get_decoder_prompt_ids(
+            language="bengali" if language == "bn" else "english",
+            task="transcribe",
+        )
+    with torch.no_grad():
+        predicted_ids = model.generate(
+            input_features,
+            forced_decoder_ids=forced_decoder_ids,
+            max_new_tokens=225,
+        )
+    text = processor.batch_decode(predicted_ids, skip_special_tokens=True)[0].strip()
+    return {
+        "text": text,
+        "duration_sec": round(len(array) / sr, 2),
+        "language": language,
+    }
+
 def resolve_parquet_files(patterns: str) -> list[str]:
     files: list[str] = []
     for pattern in [item.strip() for item in patterns.split(",") if item.strip()]:
@@ -163,14 +233,19 @@ def evaluate_dataset(metadata_csv, audio_dir, model_name="large-v3-turbo", langu
     results_df.to_csv(out_p, index=False, encoding="utf-8")
     print(f"\nDetailed predictions and sample-level errors saved to: {out_p.resolve()}")
 
-def evaluate_parquet_dataset(parquet_patterns, model_name="large-v3-turbo", language="bn", device=None, compute_type=None, models_dir="models", output_csv="evaluation_results.csv", max_samples=None):
+def evaluate_parquet_dataset(parquet_patterns, model_name="large-v3-turbo", language="bn", device=None, compute_type=None, models_dir="models", output_csv="evaluation_results.csv", max_samples=None, engine="faster-whisper"):
     rows_iter = iter_parquet_rows(parquet_patterns, max_samples=max_samples)
-    model = get_transcriber(
-        model_size=model_name,
-        device=device,
-        compute_type=compute_type,
-        download_root=models_dir
-    )
+    processor = None
+    resolved_device = None
+    if engine == "transformers":
+        processor, model, resolved_device = get_transformers_transcriber(model_name, language=language, device=device)
+    else:
+        model = get_transcriber(
+            model_size=model_name,
+            device=device,
+            compute_type=compute_type,
+            download_root=models_dir
+        )
 
     results = []
     with tempfile.TemporaryDirectory(prefix="asr_parquet_eval_") as tmpdir:
@@ -180,7 +255,11 @@ def evaluate_parquet_dataset(parquet_patterns, model_name="large-v3-turbo", lang
             audio_path.write_bytes(row["audio_bytes"])
             ref_text = row["ground_truth"]
             try:
-                pred = transcribe_file(model, audio_path, language=language)
+                if engine == "transformers":
+                    assert processor is not None and resolved_device is not None
+                    pred = transcribe_file_transformers(processor, model, resolved_device, audio_path, language=language)
+                else:
+                    pred = transcribe_file(model, audio_path, language=language)
                 hyp_text = pred["text"].strip()
                 results.append({
                     "audio_file": row["audio_file"],
@@ -227,6 +306,7 @@ def main():
     parser.add_argument("--compute_type", default=None, help="Quantization type, e.g. int8, float32, float16.")
     parser.add_argument("--models_dir", default="models", help="Directory where model weights are stored.")
     parser.add_argument("--output", default="evaluation_results.csv", help="Output CSV path for results.")
+    parser.add_argument("--engine", default="faster-whisper", choices=["faster-whisper", "transformers"], help="Transcription backend for evaluation.")
 
     args = parser.parse_args()
     if args.parquet:
@@ -239,6 +319,7 @@ def main():
             models_dir=args.models_dir,
             output_csv=args.output,
             max_samples=args.max_samples,
+            engine=args.engine,
         )
     else:
         evaluate_dataset(

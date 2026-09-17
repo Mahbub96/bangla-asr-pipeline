@@ -11,3 +11,69 @@ progress {
   accent-color: #087a5d;
   margin: 12px 0;
 }
+
+.analysis-panel {
+  display: grid;
+  gap: 14px;
+  margin-top: 16px;
+}
+
+.analysis-panel h3,
+.analysis-panel h4 {
+  margin: 0;
+}
+
+.analysis-cards,
+.mini-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 8px;
+}
+
+.analysis-cards span,
+.mini-metrics span {
+  border: 1px solid #d9e4ef;
+  border-radius: 8px;
+  background: #f8fbff;
+  padding: 8px;
+  color: #536275;
+}
+
+.analysis-cards strong {
+  display: block;
+  color: #152238;
+  margin-top: 3px;
+}
+
+.chart-card {
+  border: 1px solid #d9e4ef;
+  border-radius: 10px;
+  background: #ffffff;
+  padding: 12px;
+  overflow-x: auto;
+}
+
+.bar-chart {
+  width: 100%;
+  min-height: 170px;
+}
+
+.matrix-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 12px;
+}
+
+.compact-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 10px;
+  font-size: 0.82rem;
+}
+
+.compact-table th,
+.compact-table td {
+  border-bottom: 1px solid #e5edf5;
+  padding: 6px;
+  text-align: left;
+}

@@ -55,6 +55,7 @@ services:
       # DATA_MOUNT_MODE=rw when running dataset-preparation jobs in-container.
       - ./data:/app/data:${DATA_MOUNT_MODE:-ro}
       - ./checkpoints:/app/checkpoints
+      - ./backups:/app/backups
       - asr-tmp:/app/.tmp
     ports:
       - "${BACKEND_PORT:-8000}:8000"

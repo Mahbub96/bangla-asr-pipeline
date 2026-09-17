@@ -11,7 +11,7 @@ export function Training() {
   const { job, error, setError, attach, cancel } = useJobStream();
   const [config, setConfig] = useState<TrainingConfig>(DEFAULT_TRAINING_CONFIG);
 
-  function set(key: keyof TrainingConfig, value: string | number | boolean) {
+  function set(key: keyof TrainingConfig, value: string | number | boolean | null) {
     setConfig((current) => ({ ...current, [key]: value }));
   }
 
@@ -30,6 +30,8 @@ export function Training() {
           <Field key={key} label={key.replaceAll("_", " ")}>
             {typeof value === "boolean" ? (
               <input type="checkbox" checked={value} onChange={(event) => set(key as keyof TrainingConfig, event.target.checked)} />
+            ) : value === null ? (
+              <input placeholder="optional" onChange={(event) => set(key as keyof TrainingConfig, event.target.value ? Number(event.target.value) : null)} />
             ) : (
               <input value={value} onChange={(event) => set(key as keyof TrainingConfig, typeof value === "number" ? Number(event.target.value) : event.target.value)} />
             )}

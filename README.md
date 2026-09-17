@@ -390,9 +390,20 @@ python3 scripts/evaluate.py \
   --output reports/parquet-smoke.csv
 ```
 
-## Controlled training workflow: backup → baseline → train → compare
+## Controlled training workflow: single backup → baseline → train → compare
 
 Before any real training run, do this sequence so the project does not enter an uncontrolled gray area.
+
+The Training UI and `/api/train/jobs` run this guarded sequence by default:
+
+1. replace the previous backup with one current backup under `backups/models/current`,
+2. evaluate the current model on the fixed test Parquet set,
+3. store that baseline WER/CER inside `backup_manifest.json`,
+4. train the new model,
+5. evaluate the trained model on the same test set,
+6. write `checkpoints/model_comparison.json`, `.md`, confusion matrices, chart data, and structured training logs for manual review.
+
+The app does **not** auto-replace the model. Review WER/CER and sample predictions, then manually choose which model is best for your case.
 
 ### 1. Backup current model/checkpoint
 
@@ -402,7 +413,8 @@ If the current model is the local model cache:
 python3 scripts/model_guard.py backup \
   --source models \
   --dest backups/models \
-  --name before-training-$(date +%Y%m%d-%H%M%S)
+  --name current \
+  --single
 ```
 
 If the current model is a checkpoint:
@@ -411,10 +423,11 @@ If the current model is a checkpoint:
 python3 scripts/model_guard.py backup \
   --source checkpoints/current_model \
   --dest backups/models \
-  --name current-checkpoint-before-training-$(date +%Y%m%d-%H%M%S)
+  --name current \
+  --single
 ```
 
-The backup command writes `backup_manifest.json` inside the backup folder.
+The backup command writes `backup_manifest.json` inside the backup folder. `--single` keeps only one backup under `backups/models`.
 
 ### 2. Evaluate the old model on the fixed test set
 
@@ -441,7 +454,7 @@ docker compose -f docker-compose.yml -f docker-compose.gpu.yml run --rm backend 
     --output /app/checkpoints/parquet-smoke.csv
 ```
 
-### 3. Train the new model
+### 3. Train with the guarded wrapper
 
 Build/run the GPU Docker image first. The GPU override installs the training stack and Parquet dependencies:
 
@@ -459,10 +472,22 @@ docker compose -f docker-compose.yml -f docker-compose.gpu.yml run --rm backend 
     --dry_run_data
 ```
 
-Run LoRA training directly from Parquet. Use `--streaming_parquet` to avoid duplicating the dataset on disk; set `--max_steps` because streaming datasets do not have a fixed length:
+Run LoRA training directly from Parquet through the guard. Use `--streaming_parquet` to avoid duplicating the dataset on disk; set `--max_steps` because streaming datasets do not have a fixed length:
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.gpu.yml run --rm backend \
+  python scripts/guarded_train.py \
+    --backup_source /app/models \
+    --backup_dest /app/backups/models \
+    --backup_name current \
+    --test_parquet '/app/data/sources/subakko/hf/Data/test-*.parquet' \
+    --baseline_output /app/checkpoints/baseline-old.csv \
+    --after_output /app/checkpoints/after-new.csv \
+    --comparison_output /app/checkpoints/model_comparison.json \
+    --eval_model_before large-v3-turbo \
+    --eval_engine_before faster-whisper \
+    --eval_engine_after transformers \
+    -- \
   python scripts/train_whisper.py \
     --model_name_or_path openai/whisper-large-v3-turbo \
     --train_parquet '/app/data/sources/subakko/hf/Data/train-*.parquet' \
@@ -482,18 +507,33 @@ docker compose -f docker-compose.yml -f docker-compose.gpu.yml run --rm backend 
     --metric_for_best_model wer
 ```
 
-### 4. Evaluate the new trained model on the exact same test set
+### 4. Manual decision
+
+After the guarded run finishes, review:
+
+- `backups/models/current/backup_manifest.json` — the single retained backup plus old-model WER/CER.
+- `checkpoints/baseline-old.csv` — old-model predictions.
+- `checkpoints/after-new.csv` — new-model predictions.
+- `checkpoints/model_comparison.md` — side-by-side WER/CER verdict.
+- `checkpoints/model_comparison_analysis.json` — old/new confusion matrices and chart-ready analytics.
+- `checkpoints/model_comparison_old_confusion.csv` and `checkpoints/model_comparison_new_confusion.csv` — top token substitutions, deletions, and insertions for each model.
+- `checkpoints/whisper_bangla_lora/metrics/trainer_log.jsonl` and `.csv` — structured step-by-step training/evaluation logs containing loss, eval loss, WER, CER, exact match, char accuracy, learning rate, epoch, and runtime fields when emitted by the trainer.
+
+Lower WER and CER are better, but the comparison is advisory. Keep the decision manual, especially when one metric improves and another regresses or when sample predictions show domain-specific issues.
+
+### Manual after-training evaluation command
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.gpu.yml run --rm backend \
   python scripts/evaluate.py \
     --parquet '/app/data/sources/subakko/hf/Data/test-*.parquet' \
     --model /app/checkpoints/whisper_bangla_lora \
+    --engine transformers \
     --language bn \
     --output /app/checkpoints/after-new.csv
 ```
 
-### 5. Compare old vs new
+### Manual old-vs-new comparison command
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.gpu.yml run --rm backend \
