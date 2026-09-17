@@ -45,4 +45,4 @@ echo "Frontend log: ${FRONTEND_LOG}"
 echo "Open: http://localhost:5173"
 echo "Stop: Ctrl+C"
 
-wait -n "${BACKEND_PID}" "${FRONTEND_PID}"
+wait "${BACKEND_PID}" "${FRONTEND_PID}"
