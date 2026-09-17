@@ -1,5 +1,5 @@
 import { Terminal } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Button, Field } from "../../components/ui";
 import { DEFAULT_TRAINING_CONFIG } from "../../constants/asr";
 import { useJobStream } from "../../hooks/useJobStream";
@@ -7,9 +7,45 @@ import { postJson } from "../../lib/api";
 import type { TrainingConfig } from "../../types/asr";
 import { JobLayout } from "../jobs/JobLayout";
 
+const ACTIVE_TRAINING_JOB_KEY = "bangla-asr-active-training-job-id";
+const TERMINAL_STATUSES = new Set(["completed", "failed", "cancelled"]);
+
 export function Training() {
-  const { job, error, setError, attach, cancel } = useJobStream();
+  const { job, setJob, error, setError, attach, cancel } = useJobStream();
   const [config, setConfig] = useState<TrainingConfig>(DEFAULT_TRAINING_CONFIG);
+
+  useEffect(() => {
+    const jobId = localStorage.getItem(ACTIVE_TRAINING_JOB_KEY);
+    if (!jobId) return;
+
+    let cancelled = false;
+    fetch(`/api/jobs/${jobId}`)
+      .then((response) => (response.ok ? response.json() : null))
+      .then((snapshot) => {
+        if (cancelled) return;
+        if (!snapshot) {
+          localStorage.removeItem(ACTIVE_TRAINING_JOB_KEY);
+          return;
+        }
+        setJob(snapshot);
+        if (!TERMINAL_STATUSES.has(snapshot.status)) {
+          attach({ job_id: jobId, status_url: `/api/jobs/${jobId}`, events_url: `/api/jobs/${jobId}/events` });
+        } else {
+          localStorage.removeItem(ACTIVE_TRAINING_JOB_KEY);
+        }
+      })
+      .catch(() => setError("Could not restore the active training job after reload."));
+
+    return () => {
+      cancelled = true;
+    };
+  }, [attach, setError, setJob]);
+
+  useEffect(() => {
+    if (job && TERMINAL_STATUSES.has(job.status)) {
+      localStorage.removeItem(ACTIVE_TRAINING_JOB_KEY);
+    }
+  }, [job]);
 
   function set(key: keyof TrainingConfig, value: string | number | boolean | null) {
     setConfig((current) => ({ ...current, [key]: value }));
@@ -17,7 +53,9 @@ export function Training() {
 
   async function submit() {
     try {
-      attach(await postJson("/api/train/jobs", config));
+      const response = await postJson<{ job_id: string; status_url: string; events_url: string }>("/api/train/jobs", config);
+      localStorage.setItem(ACTIVE_TRAINING_JOB_KEY, response.job_id);
+      attach(response);
     } catch (exc: any) {
       setError(exc.message);
     }
