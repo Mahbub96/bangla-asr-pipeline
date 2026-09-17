@@ -16,12 +16,17 @@ if [ ! -d "$SCRIPT_DIR/frontend/node_modules" ]; then
     npm install --prefix "$SCRIPT_DIR/frontend"
 fi
 
-echo "Starting Bangla & English ASR Studio..."
-echo "Backend API : http://127.0.0.1:8000"
-echo "Frontend UI : http://127.0.0.1:5173"
-echo "Microphone access works from localhost / 127.0.0.1."
+HOST="${HOST:-0.0.0.0}"
+PORT="${PORT:-5173}"
+BACKEND_HOST="${BACKEND_HOST:-0.0.0.0}"
+BACKEND_PORT="${BACKEND_PORT:-8000}"
 
-"$PYTHON_EXEC" -m uvicorn backend.main:app --host 127.0.0.1 --port 8000 &
+echo "Starting Bangla & English ASR Studio..."
+echo "Backend API : http://127.0.0.1:${BACKEND_PORT}  | Network: http://192.168.50.140:${BACKEND_PORT}"
+echo "Frontend UI : http://127.0.0.1:${PORT}  | Network: http://192.168.50.140:${PORT}"
+echo "Note: Modern browsers require localhost or HTTPS for microphone access."
+
+"$PYTHON_EXEC" -m uvicorn backend.main:app --host "$BACKEND_HOST" --port "$BACKEND_PORT" &
 BACKEND_PID=$!
 
 cleanup() {
@@ -29,4 +34,4 @@ cleanup() {
 }
 trap cleanup EXIT
 
-npm run dev --prefix "$SCRIPT_DIR/frontend" -- "$@"
+npm run dev --prefix "$SCRIPT_DIR/frontend" -- --host "$HOST" --port "$PORT" "$@"
