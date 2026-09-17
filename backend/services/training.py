@@ -32,11 +32,11 @@ def build_raw_training_args(config: dict[str, Any]) -> list[str]:
         "--num_proc",
         str(int(value("num_proc", 2))),
         "--batch_size",
-        str(int(value("batch_size", 8))),
+        str(int(value("batch_size", 1))),
         "--eval_batch_size",
-        str(int(value("eval_batch_size", 8))),
+        str(int(value("eval_batch_size", 1))),
         "--gradient_accumulation_steps",
-        str(int(value("gradient_accumulation_steps", 2))),
+        str(int(value("gradient_accumulation_steps", 8))),
         "--learning_rate",
         str(value("learning_rate", "1e-4")),
         "--optim",
@@ -50,15 +50,15 @@ def build_raw_training_args(config: dict[str, Any]) -> list[str]:
         "--max_grad_norm",
         str(float(value("max_grad_norm", 1.0))),
         "--num_epochs",
-        str(int(value("num_epochs", 5))),
+        str(int(value("num_epochs", 1))),
         "--max_steps",
-        str(int(value("max_steps", 2000))),
+        str(int(value("max_steps", 10))),
         "--eval_steps",
-        str(int(value("eval_steps", 200))),
+        str(int(value("eval_steps", 10))),
         "--save_steps",
-        str(int(value("save_steps", 200))),
+        str(int(value("save_steps", 10))),
         "--logging_steps",
-        str(int(value("logging_steps", 25))),
+        str(int(value("logging_steps", 1))),
         "--save_total_limit",
         str(int(value("save_total_limit", 2))),
         "--metric_for_best_model",
@@ -70,7 +70,7 @@ def build_raw_training_args(config: dict[str, Any]) -> list[str]:
         "--generation_num_beams",
         str(int(value("generation_num_beams", 1))),
         "--dataloader_num_workers",
-        str(int(value("dataloader_num_workers", 2))),
+        str(int(value("dataloader_num_workers", 0))),
     ]
 
     train_parquet = str(value("train_parquet", "")).strip()
@@ -97,9 +97,9 @@ def build_raw_training_args(config: dict[str, Any]) -> list[str]:
         args.extend(
             [
                 "--lora_r",
-                str(int(value("lora_r", 32))),
+                str(int(value("lora_r", 16))),
                 "--lora_alpha",
-                str(int(value("lora_alpha", 64))),
+                str(int(value("lora_alpha", 32))),
                 "--lora_dropout",
                 str(float(value("lora_dropout", 0.05))),
                 "--lora_target_modules",
@@ -107,7 +107,7 @@ def build_raw_training_args(config: dict[str, Any]) -> list[str]:
             ]
         )
 
-    precision = str(value("precision", "fp16")).lower()
+    precision = str(value("precision", "fp32")).lower()
     if "bf16" in precision:
         args.append("--bf16")
     elif "fp16" in precision:
@@ -157,7 +157,7 @@ def build_training_args(config: dict[str, Any]) -> list[str]:
     eval_model_after = str(value("eval_model_after", "")).strip()
     if eval_model_after:
         args.extend(["--eval_model_after", eval_model_after])
-    eval_max_samples = config.get("eval_max_samples")
+    eval_max_samples = value("eval_max_samples", 20)
     if eval_max_samples not in (None, ""):
         args.extend(["--eval_max_samples", str(int(eval_max_samples))])
     args.append("--")

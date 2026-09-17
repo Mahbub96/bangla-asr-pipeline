@@ -159,6 +159,15 @@
   margin: 14px 0;
 }
 
+.notice-card {
+  border: 1px solid #b8ddc8;
+  border-radius: 10px;
+  background: #effaf4;
+  color: #155d3a;
+  font-weight: 700;
+  padding: 12px 14px;
+}
+
 .field {
   display: grid;
   gap: 6px;

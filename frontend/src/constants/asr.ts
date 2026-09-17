@@ -55,16 +55,16 @@ export const DEFAULT_TRAINING_CONFIG: TrainingConfig = {
   eval_model_after: "",
   eval_engine_before: "faster-whisper",
   eval_engine_after: "transformers",
-  eval_max_samples: null,
+  eval_max_samples: 20,
   output_dir: "./checkpoints/whisper_bangla_lora",
-  batch_size: 8,
-  eval_batch_size: 8,
-  gradient_accumulation_steps: 2,
+  batch_size: 1,
+  eval_batch_size: 1,
+  gradient_accumulation_steps: 8,
   learning_rate: "1e-4",
-  num_epochs: 5,
-  max_steps: 2000,
+  num_epochs: 1,
+  max_steps: 10,
   finetune_mode: "lora",
-  precision: "fp16"
+  precision: "fp32"
 };
 
 export function formatDuration(seconds: number) {

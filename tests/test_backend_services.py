@@ -58,7 +58,12 @@ def test_training_command_uses_lora_defaults():
     assert "--comparison_output checkpoints/model_comparison.json" in command
     assert "--use_lora" in args
     assert "--lora_r" in args
-    assert "--max_steps 2000" in command
+    assert "--max_steps 10" in command
+    assert "--eval_max_samples 20" in command
+    assert "--batch_size 1" in command
+    assert "--eval_batch_size 1" in command
+    assert "--gradient_accumulation_steps 8" in command
+    assert "--fp16" not in args
     assert "--model_name_or_path openai/whisper-large-v3-turbo" in command
 
 

@@ -25,6 +25,9 @@ export function Training() {
 
   return (
     <JobLayout title="Batched Training" job={job} error={error} onCancel={cancel} logsOnly>
+      <div className="notice-card">
+        Recommended Mac mini M4 smoke-test values are prefilled. You can click Launch Training without changing anything.
+      </div>
       <div className="option-grid">
         {Object.entries(config).map(([key, value]) => (
           <Field key={key} label={key.replaceAll("_", " ")}>
@@ -40,7 +43,7 @@ export function Training() {
       </div>
       <Button className="primary" onClick={submit}>
         <Terminal size={16} />
-        Launch Training
+        Launch Training with Recommended Values
       </Button>
     </JobLayout>
   );
