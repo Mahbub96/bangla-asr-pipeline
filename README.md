@@ -1,357 +1,596 @@
-# Bangla & English Automatic Speech Recognition (ASR) Studio
+# Bangla & English ASR Studio
 
-An end-to-end Automatic Speech Recognition (ASR) studio and scalable fine-tuning pipeline tailored for **Bangla (বাংলা)** and **English** speech, powered by OpenAI's Whisper (`large-v3-turbo` / `large-v3`).
+Bangla & English ASR Studio is a local-first speech-to-text application and Whisper fine-tuning pipeline. It gives operators and developers one place to transcribe audio, batch-process folders, measure ASR accuracy, prepare training data, launch training, and compare old vs new models with evidence.
 
-Designed with a local-first full-stack architecture:
-1. **React Operator Studio:** A Vite + TypeScript frontend for microphone capture, file upload, batch jobs, benchmark runs, training logs, diagnostics, and exports.
-2. **FastAPI ASR Backend:** A modular API owns model caching, audio normalization, transcription, background jobs, SSE progress streams, export files, and training subprocess control.
-3. **CLI Compatibility:** Existing scripts remain available for direct inference, evaluation, data setup, model download, and remote GPU training.
+## What problem does it solve?
 
----
+Generic Whisper models work well, but production Bangla/Banglish speech has practical problems:
 
-## 🌟 Key Features & Highlights
+- Bangla audio may be misdetected as another Indic language.
+- Mixed Bangla/English speech needs controlled decoding and repeatable evaluation.
+- Training without a baseline creates a gray area: you may not know whether the new model is actually better.
+- Large datasets and model files need durable local storage, resumable download, validation, and clear folder structure.
+- Operators need a UI for transcription/batch/evaluation, while engineers still need CLI scripts for automation and GPU servers.
 
-- **🎙️ Browser Microphone Studio**: Reliable record-then-transcribe microphone capture with explicit browser permission states and file upload fallback.
-- **📄 Multi-Format Subtitle & Text Export**: One-click download in `.txt`, `.srt` (SubRip), `.vtt` (WebVTT), and `.json` formats with precise timestamps.
-- **📂 Batch Audio Transcription**: Multi-file upload or server-directory jobs with live status, logs, and CSV/JSON export.
-- **📊 Benchmark Suite**: Automated Word Error Rate (WER) and Character Error Rate (CER) jobs against ground-truth CSVs.
-- **🏋️ Batched Audio Training Studio (36+ Parameters)**:
-  - Complete GUI exposing every Whisper training parameter (LoRA rank/alpha/dropout, target modules, QLoRA 4-bit, gradient checkpointing, mixed precision, LR schedulers, warmup, evaluation steps, beam search decoding).
-  - **Dynamic Model-Adaptive Presets**: Changing the base model (`large-v3-turbo`, `large-v3`, `medium`, `small`, `base`, `tiny`) automatically tunes optimal batch sizes, gradient accumulation, precision, and LoRA ranks.
-  - **Live Subprocess Console**: SSE terminal output streaming loss, WER/CER, and checkpoints with an instant abort button.
-  - **Dataset Integrity Verifier**: Pre-flight validation of audio existence, sample rates, and transcripts.
-  - **CLI Command Generator**: Generates equivalent copy-paste commands ready for remote headless cloud clusters (RunPod, Lambda Labs, AWS).
-- **🖥️ System Diagnostics**: Real-time GPU detection, CUDA VRAM monitor, and package dependency health checks.
-- **📱 Task-First React Layout**: Compact operator panels, responsive tables, clear progress states, and local workstation defaults.
+This project solves those by combining:
 
----
+- **React operator UI** for microphone/file transcription, batch jobs, benchmark jobs, diagnostics, and training controls.
+- **FastAPI backend** for model loading, audio normalization, job tracking, exports, evaluation, and training subprocesses.
+- **CLI scripts** for direct transcription, evaluation, model download, dataset preparation, controlled training, and old-vs-new model comparison.
+- **Docker Compose stack** for reproducible local/dev/prod runs.
 
-## 📁 Repository Structure
+## Main features
+
+- Browser microphone transcription and file upload fallback.
+- Single-file and directory transcription.
+- Batch audio jobs with live status and CSV/JSON exports.
+- Benchmarking with WER/CER against ground-truth metadata.
+- Bangla/English decoding profiles and post-processing guards.
+- Whisper model cache under `models/` so downloads survive rebuilds.
+- Dataset layout for `train`, `val`, and `test` splits.
+- GPU fine-tuning with LoRA/QLoRA options.
+- Controlled model training workflow: backup old model, evaluate old model, train new model, evaluate new model, compare results.
+- Docker CPU, Docker dev hot reload, and NVIDIA GPU override.
+
+## Repository layout
 
 ```text
-Bangla ASR/
-├── backend/                 # FastAPI app, routers, and ASR service layer
-│   └── Dockerfile           # Backend image (CPU or CUDA via build arg)
-├── frontend/                # Vite React TypeScript operator UI
-│   ├── Dockerfile           # Multi-stage: dev (HMR) / prod (nginx)
-│   └── nginx.conf.template  # SPA + /api reverse proxy (SSE-aware)
-├── docker-compose.yml       # Production stack (CPU)
-├── docker-compose.dev.yml   # Dev override: hot reload, mounted sources
-├── docker-compose.gpu.yml   # NVIDIA CUDA override
-├── docker-start.sh          # Cross-platform Docker launcher
-├── .env.example             # Ports, CORS, torch index, thread counts
-├── start.sh                 # One-click launcher for frontend + backend
-├── run_ui.sh                # Launches React + FastAPI dev stack
-├── run_api.sh               # Launches FastAPI backend only
-├── run_cli_test.sh          # Quick CLI test runner script
-├── data/
-│   ├── train/               # Training dataset
-│   │   ├── audio/           # Audio files (.wav, .mp3, .flac)
-│   │   └── metadata.csv     # [audio_path, sentence]
-│   ├── val/                 # Validation dataset
-│   │   ├── audio/
-│   │   └── metadata.csv
-│   └── test/                # Testing dataset
-│       ├── audio/
-│       └── metadata.csv
-├── models/                  # Checkpoints cache (ignored by git)
+.
+├── backend/                    # FastAPI app, routers, services, schemas
+│   └── Dockerfile              # Backend image; CPU by default, CUDA via build args
+├── frontend/                   # Vite + React operator UI
+│   ├── Dockerfile              # Dev/prod frontend image
+│   └── nginx.conf.template     # Production SPA + /api reverse proxy
 ├── scripts/
-│   ├── transcribe.py        # Inference script (single file or batch folder)
-│   ├── evaluate.py          # WER & CER benchmark tool
-│   ├── prepare_data.py      # Directory setup and dataset validator
-│   ├── create_test_audio.py # Generates test audio samples
-│   ├── download_model.py    # Model weight downloader
-│   ├── train_whisper.py     # Scalable GPU training script (36+ CLI options)
-│   └── run_train_gpu.sh     # Shell launcher for remote GPU execution
-├── requirements.txt         # Dependencies for local testing & Web UI
-├── requirements_gpu.txt     # Dependencies for GPU training cluster
-├── .gitignore
-└── README.md
+│   ├── transcribe.py           # CLI transcription for one file or a directory
+│   ├── evaluate.py             # WER/CER benchmark runner
+│   ├── prepare_data.py         # Dataset folder init and metadata validation
+│   ├── download_model.py       # Pre-download Whisper/faster-whisper models
+│   ├── train_whisper.py        # Whisper fine-tuning script
+│   ├── model_guard.py          # Backup + old/new model comparison guard
+│   ├── download_subakko_segmented.py # Resumable segmented SUBAK.KO downloader
+│   └── run_train_gpu.sh        # Example GPU training launcher
+├── data/
+│   ├── sources/                # Raw downloaded datasets
+│   ├── processed/              # Derived/extracted audio and data
+│   ├── manifests/              # Master and generated manifests
+│   ├── train/audio/            # Training audio files
+│   ├── train/metadata.csv      # Training metadata: audio_path,sentence
+│   ├── val/audio/              # Validation audio files
+│   ├── val/metadata.csv        # Validation metadata
+│   ├── test/audio/             # Held-out test audio files
+│   └── test/metadata.csv       # Held-out benchmark metadata
+├── models/                     # Model cache; ignored by git
+├── checkpoints/                # Fine-tuned checkpoints; ignored by git
+├── backups/                    # Manual/model backups; ignored if created locally
+├── reports/                    # Evaluation/comparison outputs
+├── docker-compose.yml          # Production CPU stack
+├── docker-compose.dev.yml      # Dev stack with hot reload
+├── docker-compose.gpu.yml      # NVIDIA CUDA override
+├── docker-start.sh             # Docker launcher
+├── start.sh                    # Local dev launcher for UI + API
+├── run_api.sh                  # Local backend only
+├── run_ui.sh                   # Local frontend + backend
+├── requirements.txt            # Local/API/inference dependencies
+├── requirements_gpu.txt        # Training/GPU dependencies
+└── .env.example                # Docker/runtime configuration template
 ```
 
----
+## Requirements
 
-## 📊 Dataset Format
+### For Docker usage
 
-All datasets (`train`, `val`, `test`) follow a standardized CSV schema with audio files in the corresponding `audio/` directory:
+- Docker Desktop or Docker Engine
+- Docker Compose v2: `docker compose version`
+- Enough disk space for datasets and models
 
-### `metadata.csv` Schema:
-```csv
-audio_path,sentence
-audio_001.wav,আমি বাংলায় কথা বলতে ভালোবাসি।
-audio_002.wav,Automatic speech recognition is now ready.
-```
+### For local development without Docker
 
-* **`audio_path`**: File name inside the dataset's `audio/` folder.
-* **`sentence`**: Ground truth transcript (Bengali script or English text).
+- Python 3.10+
+- Node.js 20+ recommended
+- FFmpeg
+- `npm`
+- Optional NVIDIA CUDA stack for GPU training
 
-### Validate Your Dataset
-Verify audio file integrity and check for missing files referenced in the CSV:
-```bash
-python scripts/prepare_data.py --validate --csv data/test/metadata.csv --audio_dir data/test/audio
-```
-
----
-
-## 🐳 Run with Docker (any OS)
-
-The fastest way to run the full stack on Linux, macOS (Intel or Apple Silicon)
-and Windows. Only Docker Desktop / Docker Engine with the Compose v2 plugin is
-required — no Python, Node, or ffmpeg on the host.
-
-### Production stack
-
-```bash
-cp .env.example .env          # optional: change ports, CORS, thread count
-./docker-start.sh             # or: docker compose up -d --build
-```
-
-| Service  | URL                     | Notes                                   |
-| -------- | ----------------------- | --------------------------------------- |
-| UI       | `http://localhost:8080` | nginx serving the built SPA             |
-| API      | `http://localhost:8000` | FastAPI (also proxied at `/api` via UI) |
-| Health   | `/api/health`           | container healthcheck endpoint          |
-
-The frontend talks to the backend through nginx on the same origin, so no CORS
-configuration is needed for the default setup.
-
-### Development stack (hot reload)
+macOS FFmpeg install:
 
 ```bash
-./docker-start.sh dev         # UI on http://localhost:5173
+brew install ffmpeg
 ```
 
-Sources are bind-mounted: Vite HMR reloads the React app and `uvicorn --reload`
-restarts the API on changes to `backend/` or `scripts/`. `node_modules` lives in
-an anonymous volume so a host install built for another OS never leaks in.
-
-### NVIDIA GPU
+Ubuntu/Debian FFmpeg install:
 
 ```bash
-./docker-start.sh gpu         # CUDA 12.1 torch wheels + fine-tuning stack
+sudo apt update
+sudo apt install -y ffmpeg
 ```
 
-Requires the NVIDIA Container Toolkit on the host (Linux or WSL2; macOS cannot
-pass through a GPU). Verify the host first:
+## Quick start with Docker
+
+Docker is the easiest way to run the full stack.
+
+```bash
+cp .env.example .env
+./docker-start.sh
+```
+
+Open:
+
+- UI: `http://localhost:8080`
+- API: `http://localhost:8000`
+- Health: `http://localhost:8000/api/health`
+
+Follow logs:
+
+```bash
+docker compose logs -f backend
+```
+
+Stop everything:
+
+```bash
+./docker-start.sh down
+```
+
+### Docker dev mode with hot reload
+
+```bash
+cp .env.example .env
+./docker-start.sh dev
+```
+
+Open:
+
+- UI: `http://localhost:5173`
+- API: `http://localhost:8000`
+
+### Docker GPU mode
+
+Use this only on Linux/WSL2 with NVIDIA Container Toolkit. macOS Docker Desktop cannot pass through NVIDIA GPU.
+
+Verify GPU access first:
 
 ```bash
 docker run --rm --gpus all nvidia/cuda:12.1.0-base-ubuntu22.04 nvidia-smi
 ```
 
-### Models and datasets
-
-`./models` and `./data` are bind-mounted into the container, so the multi-GB
-Whisper weights are downloaded once and survive image rebuilds. An existing
-local `models/` cache is picked up automatically.
-
-### Common commands
+Then run:
 
 ```bash
-./docker-start.sh down                  # stop everything
-docker compose logs -f backend          # follow backend logs
-docker compose exec backend python -c "import torch; print(torch.__version__)"
+./docker-start.sh gpu
 ```
 
-### Production hardening
+For training endpoints inside Docker, set this in `.env` before building:
 
-The container image is not just a dev convenience — the API enforces real limits:
+```env
+INSTALL_TRAINING=true
+DATA_MOUNT_MODE=rw
+```
 
-| Concern            | Behaviour                                                                    | Tunable                              |
-| ------------------ | ---------------------------------------------------------------------------- | ------------------------------------ |
-| Path traversal     | `batch`/`evaluate` paths must resolve inside `./data`; anything else is `403` | `ASR_EXTRA_DATA_ROOTS`               |
-| Job growth         | Finished jobs + their exports are evicted by age and count                    | `ASR_JOB_RETENTION_SECONDS`, `ASR_JOB_HISTORY_LIMIT` |
-| Scratch disk       | Uploads/exports live in a managed volume, deleted per request; hourly sweeper | mounted at `/app/.tmp`               |
-| Upload size        | Streamed with a hard cap, `413` beyond it                                     | `ASR_MAX_UPLOAD_BYTES`, `ASR_MAX_BATCH_FILES` |
-| Container logs     | JSON driver capped at 3 × 10 MB                                               | `docker-compose.yml`                 |
-| Memory             | Backend limited (default 8 GB)                                                | `BACKEND_MEMORY_LIMIT`               |
-| Datasets           | Mounted read-only by default                                                  | `DATA_MOUNT_MODE=rw`                 |
-| Headers            | `nosniff`, `SAMEORIGIN`, `Referrer-Policy`, `Permissions-Policy`              | `frontend/nginx.conf.template`       |
+Then rebuild:
 
-`GET /api/health` returns live job counts and the active retention settings.
-
-The API has **no authentication** — it is designed to sit on a trusted network
-or behind an authenticating reverse proxy. Do not expose port 8000 or 8080
-directly to the internet.
-
-### Microphone access
-
-Browsers only expose `getUserMedia` on `localhost` or HTTPS. Opening the UI via
-a LAN IP (e.g. `http://192.168.x.x:8080`) will show the upload fallback instead
-of live recording — use `localhost` on the machine itself, or put the stack
-behind a TLS terminator for LAN recording.
-
----
-
-## 🚀 Quick Start (Local Machine)
-
-### 1. System Requirements & Setup
-
-#### On Ubuntu / Debian:
 ```bash
-# Install system audio codec
-sudo apt update && sudo apt install -y ffmpeg
+./docker-start.sh gpu
+```
 
-# Create virtual environment & install dependencies
+## Local development setup
+
+Use this if you want to modify backend/frontend code directly on the host.
+
+```bash
 python3 -m venv .venv
 source .venv/bin/activate
+pip install --upgrade pip
 pip install -r requirements.txt
+npm install --prefix frontend
 ```
 
-#### On macOS (Apple Silicon M1 / M2 / M3 / M4):
-```bash
-# Install system audio codec via Homebrew
-brew install ffmpeg
+Start backend + frontend:
 
-# Create virtual environment & install dependencies
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-```
-
-### 2. Launch the React + FastAPI Studio
-Launch the local browser dashboard:
 ```bash
 ./start.sh
 ```
-Then open **http://127.0.0.1:5173** in your browser.
 
-The backend API runs at **http://127.0.0.1:8000**. Microphone access works from `localhost` / `127.0.0.1`; do not open the app through `0.0.0.0`.
+Or start them separately:
 
-Available sections:
-- **🎯 Live Mic & Audio**:
-  - Browser records audio with `MediaRecorder`, then sends the finished clip to FastAPI.
-  - Cross-browser audio normalization converts WebM, OGG, MP4/AAC, MP3, and WAV streams to clean 16kHz WAV via FFmpeg.
-- **📂 Batch Audio**: Folder or multi-file audio batch processing with live streaming tables.
-- **📊 Benchmark (WER / CER)**: Error rate calculation and dataset validation against ground truth.
-- **🏋️ Batched Training**: Full training hyperparameter suite (36+ parameters) with live console logs.
-- **🖥️ Diagnostics**: Hardware acceleration and environment health check.
-
-### 3. CLI Test Runner
-Run transcription directly across the test audio folder:
 ```bash
-./run_cli_test.sh
-```
-*(Optional arguments: `./run_cli_test.sh <target_path> <model_name> <language>`)*
-
----
-
-### 4. Download Whisper Model
-Pre-download model weights locally (defaults to `large-v3-turbo`):
-```bash
-python scripts/download_model.py --model large-v3-turbo
-```
-*(Options: `large-v3-turbo`, `large-v3`, `medium`, `small`, `base`, `tiny`)*
-
-### 5. CLI Audio Transcription
-Transcribe a single audio file with auto-detection or language specification:
-```bash
-# Auto-detect language (Bangla or English)
-python scripts/transcribe.py path/to/audio.wav --language auto
-
-# Specify Bangla ('bn')
-python scripts/transcribe.py path/to/audio.wav --language bn
+./run_api.sh
+npm run dev --prefix frontend
 ```
 
-Transcribe an entire directory and export to JSON:
+Open:
+
+- Local UI: `http://127.0.0.1:5173`
+- Local API: `http://127.0.0.1:8000`
+
+Important browser note: microphone access works on `localhost` / `127.0.0.1` or HTTPS. If you open the UI through a LAN IP, most browsers disable microphone capture and you should use file upload instead.
+
+## Environment configuration
+
+Copy `.env.example` to `.env` for Docker runs:
+
 ```bash
-python scripts/transcribe.py data/test/audio/ --language auto --output results.json
+cp .env.example .env
 ```
 
-### 6. Evaluate Test Set (WER & CER)
-Compute Word Error Rate (WER) and Character Error Rate (CER) across your test split:
-```bash
-python scripts/evaluate.py --metadata data/test/metadata.csv --audio_dir data/test/audio --language auto
+Common settings:
+
+| Variable | Purpose | Default |
+| --- | --- | --- |
+| `FRONTEND_PORT` | Production UI port | `8080` |
+| `BACKEND_PORT` | FastAPI port | `8000` |
+| `DEV_FRONTEND_PORT` | Vite dev UI port | `5173` |
+| `ASR_CORS_ORIGINS` | Allowed browser origins | `*` |
+| `DATA_MOUNT_MODE` | Container dataset mount mode: `ro` or `rw` | `ro` |
+| `BACKEND_MEMORY_LIMIT` | Backend container memory cap | `8g` |
+| `OMP_NUM_THREADS` | CPU thread count | `4` |
+| `TORCH_INDEX_URL` | PyTorch wheel index | CPU index |
+| `INSTALL_TRAINING` | Install training dependencies in Docker image | `false` |
+
+## Dataset format
+
+Each split uses the same simple CSV format:
+
+```csv
+audio_path,sentence
+audio_001.wav,আমি বাংলায় কথা বলতে ভালোবাসি।
+audio_002.wav,Automatic speech recognition is ready.
 ```
+
+Rules:
+
+- `audio_path` is relative to that split's `audio/` folder unless an absolute path is provided.
+- `sentence` is the ground-truth transcript.
+- Keep `test` fixed and untouched for fair old-vs-new model comparison.
+- Use `train` for fitting, `val` for training-time evaluation, and `test` for final benchmark.
+
+Initialize folder structure:
+
+```bash
+python3 scripts/prepare_data.py --init
+```
+
+Validate a split:
+
+```bash
+python3 scripts/prepare_data.py \
+  --validate \
+  --csv data/test/metadata.csv \
+  --audio_dir data/test/audio
+```
+
+## Large dataset preparation
+
+Raw downloads should stay under `data/sources/<dataset>/`. Derived/extracted audio should go under `data/processed/` or the trainer-facing `data/train`, `data/val`, and `data/test` folders.
+
+For SUBAK.KO segmented Hugging Face download:
+
+```bash
+python3 scripts/download_subakko_segmented.py \
+  --split all \
+  --segments 8 \
+  --files 2 \
+  2>&1 | tee data/sources/subakko/download.log
+```
+
+Human-readable live download log:
+
+```bash
+tail -f data/sources/subakko/download.log | grep --line-buffered -E 'START|DONE|FAIL|retry|complete'
+```
+
+Meaning:
+
+- `START`: a shard started
+- `DONE`: a shard completed
+- `retry`: a part failed but is retrying
+- `FAIL`: a shard failed after retries
+- `SUBAK.KO download complete`: all selected files completed
+
+Note: Hugging Face ASR datasets may be Parquet files with embedded audio, not plain `.wav` files. Download completion does not always mean training-ready audio exists. Extraction/conversion may still be required.
+
+## Model download
+
+Pre-download the default faster-whisper model cache:
+
+```bash
+python3 scripts/download_model.py --model large-v3-turbo --models_dir models
+```
+
+Supported common names include:
+
+- `large-v3-turbo`
+- `large-v3`
+- `medium`
+- `small`
+- `base`
+- `tiny`
+
+## CLI transcription
+
+Single file:
+
+```bash
+python3 scripts/transcribe.py path/to/audio.wav --language auto
+```
+
+Force Bangla:
+
+```bash
+python3 scripts/transcribe.py path/to/audio.wav --language bn
+```
+
+Directory with JSON output:
+
+```bash
+python3 scripts/transcribe.py data/test/audio --language auto --output reports/transcriptions.json
+```
+
+Useful options:
+
+```bash
+python3 scripts/transcribe.py path/to/audio.wav \
+  --model large-v3-turbo \
+  --language bn \
+  --beam_size 5 \
+  --vad_aggressiveness medium \
+  --profile bangla_high_accuracy
+```
+
+## Evaluation / efficiency check
+
+Evaluate one model on the fixed test set:
+
+```bash
+python3 scripts/evaluate.py \
+  --metadata data/test/metadata.csv \
+  --audio_dir data/test/audio \
+  --model large-v3-turbo \
+  --language bn \
+  --output reports/evaluation_results.csv
+```
+
 Outputs:
-* Global corpus **WER** and **CER**
-* Sample-by-sample analysis saved to `evaluation_results.csv`
 
----
+- Total evaluated samples
+- Overall WER
+- Overall CER
+- Per-sample predictions and errors in the output CSV
 
-## ⚡ Training & Fine-Tuning (GPU Cluster & Cloud)
+Lower WER/CER is better.
 
-When training on a server or GPU cluster (e.g. RTX 3090/4090, A10G, A100, H100):
+## Controlled training workflow: backup → baseline → train → compare
 
-### 1. Install GPU Requirements
+Before any real training run, do this sequence so the project does not enter an uncontrolled gray area.
+
+### 1. Backup current model/checkpoint
+
+If the current model is the local model cache:
+
+```bash
+python3 scripts/model_guard.py backup \
+  --source models \
+  --dest backups/models \
+  --name before-training-$(date +%Y%m%d-%H%M%S)
+```
+
+If the current model is a checkpoint:
+
+```bash
+python3 scripts/model_guard.py backup \
+  --source checkpoints/current_model \
+  --dest backups/models \
+  --name current-checkpoint-before-training-$(date +%Y%m%d-%H%M%S)
+```
+
+The backup command writes `backup_manifest.json` inside the backup folder.
+
+### 2. Evaluate the old model on the fixed test set
+
+```bash
+python3 scripts/evaluate.py \
+  --metadata data/test/metadata.csv \
+  --audio_dir data/test/audio \
+  --model large-v3-turbo \
+  --language bn \
+  --output reports/baseline-old.csv
+```
+
+### 3. Train the new model
+
+Install GPU/training requirements on the training machine:
+
 ```bash
 pip install -r requirements_gpu.txt
 ```
 
-### 2. Launch Training via GUI or CLI
+Run LoRA training:
 
-#### Option A: Web UI Studio (Recommended)
-Navigate to the **🏋️ Batched Training** tab, select your base model to auto-adapt parameters, and click **🚀 Launch Batched Training**. You can inspect live step loss and metrics in the streaming terminal or click **🛑 Abort Training** at any time.
+```bash
+python3 scripts/train_whisper.py \
+  --model_name_or_path openai/whisper-large-v3-turbo \
+  --train_csv data/train/metadata.csv \
+  --train_audio data/train/audio \
+  --val_csv data/val/metadata.csv \
+  --val_audio data/val/audio \
+  --output_dir checkpoints/whisper_bangla_lora \
+  --language bengali \
+  --task transcribe \
+  --use_lora \
+  --batch_size 8 \
+  --eval_batch_size 8 \
+  --gradient_accumulation_steps 2 \
+  --learning_rate 1e-4 \
+  --num_epochs 5 \
+  --eval_steps 200 \
+  --save_steps 200 \
+  --metric_for_best_model wer
+```
 
-#### Option B: Automated Shell Launcher
+Or use the example launcher:
+
 ```bash
 bash scripts/run_train_gpu.sh
 ```
 
-#### Option C: Full CLI Customization
+### 4. Evaluate the new trained model on the exact same test set
+
 ```bash
-python scripts/train_whisper.py \
-    --model_name_or_path "openai/whisper-large-v3-turbo" \
-    --train_csv "data/train/metadata.csv" \
-    --train_audio "data/train/audio" \
-    --val_csv "data/val/metadata.csv" \
-    --val_audio "data/val/audio" \
-    --output_dir "./checkpoints/whisper_bangla_lora" \
-    --language "bengali" \
-    --task "transcribe" \
-    --use_lora \
-    --lora_r 32 \
-    --lora_alpha 64 \
-    --lora_dropout 0.05 \
-    --lora_target_modules "q_proj,v_proj" \
-    --batch_size 8 \
-    --eval_batch_size 8 \
-    --gradient_accumulation_steps 2 \
-    --fp16 \
-    --gradient_checkpointing \
-    --optim "adamw_torch" \
-    --learning_rate 1e-4 \
-    --lr_scheduler_type "linear" \
-    --warmup_steps 50 \
-    --weight_decay 0.01 \
-    --max_grad_norm 1.0 \
-    --num_epochs 5 \
-    --eval_steps 200 \
-    --save_steps 200 \
-    --save_total_limit 2 \
-    --metric_for_best_model "wer"
+python3 scripts/evaluate.py \
+  --metadata data/test/metadata.csv \
+  --audio_dir data/test/audio \
+  --model checkpoints/whisper_bangla_lora \
+  --language bn \
+  --output reports/after-new.csv
 ```
 
----
+### 5. Compare old vs new
 
-## 🧬 Understanding LoRA (Low-Rank Adaptation)
+```bash
+python3 scripts/model_guard.py compare \
+  --old reports/baseline-old.csv \
+  --new reports/after-new.csv \
+  --output reports/model_comparison.json
+```
 
-This studio leverages **LoRA (Low-Rank Adaptation)** for fine-tuning Whisper without modifying the massive 800M frozen base model weights:
+This writes:
 
-- **Mathematical Efficiency**: Instead of updating full $d \times k$ matrices ($1024 \times 1024 = 1,048,576$ parameters), LoRA injects two low-rank matrices $A$ and $B$ of rank $r=32$ ($2 \times 32 \times 1024 = 65,536$ parameters), training **< 2%** of the model.
-- **Memory Footprint**: Reduces training VRAM/RAM from 24 GB down to **~6.5–8 GB**, enabling fine-tuning on consumer GPUs and Apple Silicon Unified Memory.
-- **Compact Checkpoints**: Adapter weights are only **~30 MB** each (compared to ~3.1 GB for full models), conserving disk space.
-- **Zero Catastrophic Forgetting**: Preserves Whisper's pre-trained multilingual foundation while adapting specifically to Bangla phonetics.
-- **Zero Inference Overhead**: Adapter weights can be merged directly into the base weights ($W = W_0 + BA$) for production serving.
+- `reports/model_comparison.json`
+- `reports/model_comparison.md`
 
-### Key LoRA Hyperparameters
-- **Rank (`lora_r = 32`)**: Bottleneck dimension; 32 provides the sweet spot for speech acoustic feature adaptation.
-- **Alpha (`lora_alpha = 64`)**: Scaling multiplier ($2 \times r$) determining adapter strength.
-- **Dropout (`lora_dropout = 0.05`)**: Prevents overfitting on smaller training datasets.
-- **Target Modules (`q_proj,v_proj`)**: Whisper's attention projection layers.
+Verdicts:
 
----
+| Verdict | Meaning |
+| --- | --- |
+| `new_better` | New model improved WER/CER overall. |
+| `old_better` | Old model is safer; new model regressed. |
+| `gray_area_mixed_metrics` | One metric improved and another regressed; needs human review before replacing the old model. |
 
-## 💻 Hardware & Platform Benchmarks
+## LoRA training notes
 
-| Workload | Ubuntu (NVIDIA RTX 3090/4090) | Apple Silicon (Mac mini M4, 16 GB) | Linux / Intel CPU (8+ Cores) |
-| :--- | :--- | :--- | :--- |
-| **Whisper `turbo` Inference** | CUDA Float16 (Instant) | Apple Accelerate INT8 (20×–30× real-time) | CTranslate2 INT8 (8×–12× real-time) |
-| **LoRA Fine-Tuning** | Full FP16 / BF16 (~7 GB VRAM) | Native Metal MPS (~7.5 GB RAM) | CPU Mini-Batches (Testing only) |
-| **Audio Codec** | `/usr/bin/ffmpeg` via `apt` | `/opt/homebrew/bin/ffmpeg` via `brew` | System `ffmpeg` |
-| **Recommended Mode** | CUDA + LoRA / Full | Metal MPS + LoRA (`batch_size=4`) | INT8 Inference & Benchmarks |
+LoRA fine-tuning trains small adapter layers instead of all Whisper weights.
 
----
+Benefits:
 
-## 📄 License
+- Lower VRAM/RAM requirement than full fine-tuning.
+- Smaller checkpoint size.
+- Faster experimentation.
+- Original base model remains reusable.
 
-This project is open source and available under the Apache License 2.0.
+Common defaults:
+
+| Parameter | Default | Notes |
+| --- | ---: | --- |
+| `lora_r` | `32` | Adapter rank |
+| `lora_alpha` | `64` | Adapter scaling |
+| `lora_dropout` | `0.05` | Regularization |
+| `lora_target_modules` | `q_proj,v_proj` | Whisper attention projection modules |
+| `metric_for_best_model` | `wer` | Lower is better |
+
+## API and UI workflow
+
+After the app is running, use the UI sections:
+
+- **Live Mic & Audio**: record or upload one file and transcribe.
+- **Batch Audio**: process many files with job progress.
+- **Benchmark**: run WER/CER evaluation against metadata CSV.
+- **Training**: configure fine-tuning parameters and stream logs.
+- **Diagnostics**: check package, hardware, and runtime status.
+
+Backend API routes are under `/api/*`. Health check:
+
+```bash
+curl http://localhost:8000/api/health
+```
+
+## Production and security notes
+
+- The API has no built-in authentication. Put it behind a trusted network, VPN, or authenticating reverse proxy before exposing it.
+- Keep `models/`, `checkpoints/`, `data/`, `backups/`, and `reports/` out of git unless intentionally publishing small examples.
+- Container logs are capped in `docker-compose.yml` to avoid unbounded disk growth.
+- Uploaded scratch files are stored in the container temp volume and cleaned by backend retention logic.
+- Batch/evaluate paths are restricted to `./data` and configured extra roots to reduce path traversal risk.
+
+## Common commands
+
+```bash
+# Docker production
+./docker-start.sh
+
+# Docker dev hot reload
+./docker-start.sh dev
+
+# Docker logs
+./docker-start.sh logs
+
+# Stop Docker stack
+./docker-start.sh down
+
+# Local backend only
+./run_api.sh
+
+# Local UI + backend
+./start.sh
+
+# Validate test dataset
+python3 scripts/prepare_data.py --validate --csv data/test/metadata.csv --audio_dir data/test/audio
+
+# Transcribe a file
+python3 scripts/transcribe.py path/to/audio.wav --language bn
+
+# Evaluate fixed test set
+python3 scripts/evaluate.py --metadata data/test/metadata.csv --audio_dir data/test/audio --language bn
+
+# Compare old/new evaluation outputs
+python3 scripts/model_guard.py compare --old reports/baseline-old.csv --new reports/after-new.csv --output reports/model_comparison.json
+```
+
+## Troubleshooting
+
+### Docker project is not running
+
+```bash
+docker compose ps
+./docker-start.sh logs
+```
+
+### Port already in use
+
+Change `.env`:
+
+```env
+FRONTEND_PORT=8081
+BACKEND_PORT=8001
+DEV_FRONTEND_PORT=5174
+```
+
+Then restart Docker.
+
+### Microphone does not work on LAN IP
+
+Use `http://localhost:5173` or `http://127.0.0.1:5173`, or serve the UI through HTTPS. Browsers block microphone access on normal LAN HTTP origins.
+
+### Training dependencies missing
+
+For local/GPU training:
+
+```bash
+pip install -r requirements_gpu.txt
+```
+
+For Docker training, set:
+
+```env
+INSTALL_TRAINING=true
+DATA_MOUNT_MODE=rw
+```
+
+Then rebuild the image.
+
+### Download is running but no `.wav` files appear
+
+Some ASR datasets download as Parquet shards. Parquet can contain embedded audio bytes and transcripts. You still need an extraction/conversion step before the data becomes trainer-ready audio files.
+
+## License
+
+This project is released under the Apache License 2.0.

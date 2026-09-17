@@ -48,11 +48,17 @@ output_*/
 # Dataset audio binaries (preserve directory structure via .gitkeep)
 data/**/audio/*
 !data/**/audio/.gitkeep
+data/sources/
+data/research/
+data/processed/
+data/manifests/
 
 # Evaluation output & experiment logs
 evaluation_results.csv
 test_transcriptions.json
 batch_transcriptions.json
+reports/
+backups/
 *.log
 runs/
 events.out.tfevents.*
@@ -65,6 +71,7 @@ frontend/*.tsbuildinfo
 
 # OS and Editor specific
 .DS_Store
+._*
 Thumbs.db
 .vscode/
 .idea/
