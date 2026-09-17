@@ -26,6 +26,28 @@ def is_macos_sidecar(path: Path) -> bool:
     return any(part.startswith("._") for part in path.parts)
 
 
+def remove_path_tolerant(path: Path) -> None:
+    """Remove a file/tree while tolerating disappearing macOS sidecars.
+
+    AppleDouble files on external macOS volumes can vanish between directory
+    listing and unlink during shutil.rmtree. Missing files are harmless for our
+    single-backup replacement; real permission errors still surface.
+    """
+
+    def onerror(function: Any, item: str, exc_info: tuple[type[BaseException], BaseException, Any]) -> None:
+        if isinstance(exc_info[1], FileNotFoundError):
+            return
+        raise exc_info[1]
+
+    if path.is_dir():
+        shutil.rmtree(path, onerror=onerror)
+    else:
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            pass
+
+
 def utc_stamp() -> str:
     return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
 
@@ -86,10 +108,7 @@ def copy_backup(source: Path, destination_root: Path, name: str | None, hash_fil
     destination_root.mkdir(parents=True, exist_ok=True)
     if single:
         for existing in destination_root.iterdir():
-            if existing.is_dir():
-                shutil.rmtree(existing)
-            else:
-                existing.unlink()
+            remove_path_tolerant(existing)
     elif backup_dir.exists():
         raise FileExistsError(f"Backup destination already exists: {backup_dir}")
     shutil.copytree(
