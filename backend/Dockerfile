@@ -42,9 +42,17 @@ RUN pip install --extra-index-url "${TORCH_INDEX_URL}" -r requirements.txt
 RUN if [ "${INSTALL_TRAINING}" = "true" ]; then \
         pip install --extra-index-url "${TORCH_INDEX_URL}" -r requirements_gpu.txt ; \
     fi
+# CTranslate2 (faster-whisper) wheels are built against CUDA 12 and dlopen
+# libcublas.so.12 at runtime. A torch build from another CUDA line (e.g. cu130)
+# does not ship it, so GPU images install the CUDA 12 cuBLAS wheel explicitly.
+RUN case "${TORCH_INDEX_URL}" in \
+        */whl/cu*) pip install "nvidia-cublas-cu12" ;; \
+    esac
 
 # --------------------------------------------------------------------- runtime
 FROM python:${PYTHON_VERSION}-slim AS runtime
+
+ARG PYTHON_VERSION
 
 # ffmpeg  -> audio sanitising (backend/services/audio.py)
 # libsndfile1 -> soundfile/librosa
@@ -66,7 +74,8 @@ ENV PATH="/opt/venv/bin:${PATH}" \
     HF_HUB_CACHE=/app/models \
     OMP_NUM_THREADS=4 \
     ASR_HOST=0.0.0.0 \
-    ASR_PORT=8000
+    ASR_PORT=8000 \
+    LD_LIBRARY_PATH=/opt/venv/lib/python${PYTHON_VERSION}/site-packages/nvidia/cublas/lib
 
 WORKDIR /app
 

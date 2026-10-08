@@ -84,8 +84,11 @@ services:
         condition: service_healthy
     environment:
       BACKEND_UPSTREAM: ${BACKEND_UPSTREAM:-http://backend:8000}
+    # Port 80 stays inside the container for the healthcheck; only HTTPS is published.
     ports:
-      - "${FRONTEND_PORT:-8080}:80"
+      - "${FRONTEND_PORT:-8080}:443"
+    volumes:
+      - ./certs:/etc/nginx/certs:ro
     networks: [asr]
 
 volumes:

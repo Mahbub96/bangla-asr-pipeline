@@ -1,5 +1,7 @@
 torch>=2.0.0
 faster-whisper>=1.0.0
+# PyAV 19 removed av.open(metadata_errors=...), which faster-whisper 1.2.1 still passes.
+av<19
 soundfile
 librosa
 jiwer

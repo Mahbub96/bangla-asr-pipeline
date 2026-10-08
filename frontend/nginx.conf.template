@@ -4,6 +4,11 @@
 
 server {
     listen       80;
+    # HTTPS for LAN access (browsers only allow the microphone on HTTPS).
+    # Certificate files are mounted from ./certs by docker-compose.yml.
+    listen       443 ssl;
+    ssl_certificate      /etc/nginx/certs/server.crt;
+    ssl_certificate_key  /etc/nginx/certs/server.key;
     server_name  _;
 
     root  /usr/share/nginx/html;

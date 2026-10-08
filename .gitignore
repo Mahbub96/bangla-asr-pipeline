@@ -76,3 +76,6 @@ Thumbs.db
 .vscode/
 .idea/
 .ssl/
+
+# TLS certificate and private key (generated per server)
+certs/

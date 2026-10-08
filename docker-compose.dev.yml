@@ -51,6 +51,6 @@ services:
     volumes:
       - ./frontend:/app
       - /app/node_modules
-    # Replaces the production 80 mapping rather than adding to it.
+    # Replaces the production 443 mapping rather than adding to it.
     ports: !override
       - "${DEV_FRONTEND_PORT:-5173}:5173"
